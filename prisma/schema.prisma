@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  client
+  tester
+}
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  ended
+}
+
+enum CampaignVisibility {
+  private
+  public
+  restricted
+}
+
+enum SubmissionKind {
+  bug
+  feedback
+}
+
+enum SubmissionSeverity {
+  critical
+  high
+  medium
+  mild
+}
+
+enum SubmissionStatus {
+  submitted
+  in_review @map("in-review")
+  approved
+  rejected
+  disputed
+}
+
+enum PayoutStatus {
+  pending
+  completed
+  failed
+}
+
+enum WaitlistRole {
+  client
+  tester
+}
+
+model User {
+  id             String   @id @db.Uuid
+  walletAddress  String   @unique @map("wallet_address")
+  role           UserRole
+  displayName    String?  @map("display_name")
+  bio            String?
+  avatarUrl      String?  @map("avatar_url")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  clientProfile         ClientProfile?
+  testerWorkPreferences TesterWorkPreferences?
+  testerAvailability    TesterAvailability?
+  clientPaymentMethods  ClientPaymentMethod[]
+  campaigns             Campaign[]             @relation("ClientCampaigns")
+  submissions           Submission[]           @relation("TesterSubmissions")
+  submissionComments    SubmissionComment[]
+  payouts               Payout[]               @relation("TesterPayouts")
+  submissionLogs        SubmissionLog[]        @relation("ActorSubmissionLogs")
+  campaignFees          CampaignFee[]
+
+  @@map("users")
+}
+
+model ClientProfile {
+  userId        String   @id @map("user_id") @db.Uuid
+  companyName   String   @map("company_name")
+  contactPerson String?  @map("contact_person")
+  description   String?
+  logoUrl       String?  @map("logo_url")
+  contactEmail  String?  @map("contact_email")
+  websiteUrl    String?  @map("website_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("client_profiles")
+}
+
+model TesterWorkPreferences {
+  userId           String   @id @map("user_id") @db.Uuid
+  specializations  String[]
+  primaryDevices   String[] @map("primary_devices")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tester_work_preferences")
+}
+
+model TesterAvailability {
+  userId                  String   @id @map("user_id") @db.Uuid
+  availabilityToStart     String?  @map("availability_to_start")
+  preferredTimeCommitment String?  @map("preferred_time_commitment")
+  customDays              String?  @map("custom_days")
+  workingHours            Json?    @map("working_hours")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tester_availability")
+}
+
+model ClientPaymentMethod {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  walletAddress String   @map("wallet_address")
+  label         String?
+  isPrimary     Boolean  @default(false) @map("is_primary")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("client_payment_methods")
+}
+
+model Campaign {
+  id                   String             @id @default(uuid()) @db.Uuid
+  clientId             String             @map("client_id") @db.Uuid
+  title                String
+  description          String?
+  /// In-scope / test scope (UI: testScope)
+  scope                String?
+  outOfScope           String?            @map("out_of_scope")
+  inScopeTestCaseUrl   String?            @map("in_scope_test_case_url")
+  disclosureGuidelines String?            @map("disclosure_guidelines")
+  rewardEligibility    String?            @map("reward_eligibility")
+  downloadLinks        Json?              @map("download_links")
+  startDate            DateTime?          @map("start_date") @db.Date
+  endDate              DateTime?          @map("end_date") @db.Date
+  /// Private programs: tester must be approved before submitting
+  isApproved           Boolean            @default(false) @map("is_approved")
+  status               CampaignStatus     @default(draft)
+  budget               Decimal            @default(0) @db.Decimal(20, 8)
+  budgetRemaining      Decimal            @default(0) @map("budget_remaining") @db.Decimal(20, 8)
+  availableBalance     Decimal            @default(0) @map("available_balance") @db.Decimal(20, 8)
+  allocatedBalance     Decimal            @default(0) @map("allocated_balance") @db.Decimal(20, 8)
+  deviceRequirements   String[]           @map("device_requirements")
+  visibility           CampaignVisibility @default(private)
+  listed               Boolean            @default(false)
+  escrowPda            String?            @map("escrow_pda")
+  reviewWindowDays     Int?               @map("review_window_days")
+  severityRewards      Json?              @map("severity_rewards")
+  creationFeePaid      Boolean            @default(false) @map("creation_fee_paid")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  client      User          @relation("ClientCampaigns", fields: [clientId], references: [id])
+  submissions Submission[]
+  payouts     Payout[]
+  campaignFees CampaignFee[]
+
+  @@index([clientId])
+  @@index([listed, status, escrowPda])
+  @@map("campaigns")
+}
+
+model Submission {
+  id                 String              @id @default(uuid()) @db.Uuid
+  campaignId         String              @map("campaign_id") @db.Uuid
+  testerId           String              @map("tester_id") @db.Uuid
+  kind               SubmissionKind
+  title              String
+  description        String
+  stepsToReproduce   String              @map("steps_to_reproduce")
+  expectedBehavior   String?             @map("expected_behavior")
+  actualBehavior     String?             @map("actual_behavior")
+  deviceInfo         String?             @map("device_info")
+  /** Selected device labels (e.g. Mac, Windows) — complements `deviceInfo` summary. */
+  devices            String[]            @default([])
+  browser            String?
+  additionalNotes    String?             @map("additional_notes")
+  /** External video (Loom, YouTube, Drive, …). */
+  videoUrl           String?             @map("video_url")
+  severity           SubmissionSeverity
+  status             SubmissionStatus    @default(submitted)
+  rejectionText      String?             @map("rejection_text")
+  allocatedAmount    Decimal             @default(0) @map("allocated_amount") @db.Decimal(20, 8)
+  payoutAmount       Decimal?            @map("payout_amount") @db.Decimal(20, 8)
+  /** Screenshot / file attachment URLs (not video or generic links). */
+  evidenceUrls       String[]            @map("evidence_urls")
+  /** External reference URLs (docs, related issues, etc.) — not attachments or primary video. */
+  resourceLinks      String[]            @default([]) @map("resource_links")
+  submittedAt        DateTime            @default(now()) @map("submitted_at")
+  reviewedAt         DateTime?           @map("reviewed_at")
+  expiresAt          DateTime?           @map("expires_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  tester   User     @relation("TesterSubmissions", fields: [testerId], references: [id])
+
+  comments SubmissionComment[]
+  logs     SubmissionLog[]
+  payouts  Payout[]
+
+  @@index([campaignId])
+  @@index([testerId])
+  @@index([status])
+  @@map("submissions")
+}
+
+model SubmissionComment {
+  id            String   @id @default(uuid()) @db.Uuid
+  submissionId  String   @map("submission_id") @db.Uuid
+  authorId      String   @map("author_id") @db.Uuid
+  parentId      String?  @map("parent_id") @db.Uuid
+  body          String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  submission Submission          @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  author     User                @relation(fields: [authorId], references: [id])
+  parent     SubmissionComment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    SubmissionComment[] @relation("CommentThread")
+
+  @@index([submissionId])
+  @@map("submission_comments")
+}
+
+model SubmissionLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  submissionId  String   @map("submission_id") @db.Uuid
+  actorId       String?  @map("actor_id") @db.Uuid
+  eventType     String   @map("event_type")
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  actor      User?      @relation("ActorSubmissionLogs", fields: [actorId], references: [id])
+
+  @@index([submissionId])
+  @@map("submission_logs")
+}
+
+model Payout {
+  id            String      @id @default(uuid()) @db.Uuid
+  submissionId  String      @map("submission_id") @db.Uuid
+  testerId      String      @map("tester_id") @db.Uuid
+  campaignId    String      @map("campaign_id") @db.Uuid
+  grossAmount   Decimal     @map("gross_amount") @db.Decimal(20, 8)
+  testerAmount  Decimal     @map("tester_amount") @db.Decimal(20, 8)
+  platformFee   Decimal     @map("platform_fee") @db.Decimal(20, 8)
+  txSignature   String      @map("tx_signature")
+  status        PayoutStatus @default(pending)
+  paidAt        DateTime?   @map("paid_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+  tester     User       @relation("TesterPayouts", fields: [testerId], references: [id])
+  campaign   Campaign   @relation(fields: [campaignId], references: [id])
+
+  @@index([submissionId])
+  @@index([testerId])
+  @@index([campaignId])
+  @@map("payouts")
+}
+
+model CampaignFee {
+  id           String   @id @default(uuid()) @db.Uuid
+  campaignId   String   @map("campaign_id") @db.Uuid
+  clientId     String   @map("client_id") @db.Uuid
+  amount       Decimal  @db.Decimal(20, 8)
+  txSignature  String   @map("tx_signature")
+  paidAt       DateTime @default(now()) @map("paid_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  client   User     @relation(fields: [clientId], references: [id])
+
+  @@index([campaignId])
+  @@map("campaign_fees")
+}
+
+model Waitlist {
+  id        String       @id @default(uuid()) @db.Uuid
+  email     String       @unique
+  role      WaitlistRole
+  notes     String?
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  @@map("waitlist")
+}
