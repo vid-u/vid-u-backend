@@ -45,11 +45,35 @@ function getFrontendOriginForEmail(): string | null {
 }
 
 /**
+ * Host for waitlist email images. Prefer `EMAIL_ASSETS_ORIGIN` when the first `FRONTEND_URL`
+ * is not the static site (otherwise Gmail’s image proxy gets 404s from the API host).
+ */
+function getEmailAssetsOrigin(): string | null {
+  const explicit = env.EMAIL_ASSETS_ORIGIN?.trim();
+  if (explicit) {
+    try {
+      return new URL(explicit).origin;
+    } catch {
+      return null;
+    }
+  }
+  const logoUrl = env.EMAIL_LOGO_URL?.trim();
+  if (logoUrl) {
+    try {
+      return new URL(logoUrl).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  return getFrontendOriginForEmail();
+}
+
+/**
  * Public URLs for brand images in HTML email (served from the landing site `public/`, e.g. bughyve.com).
  * Uses raster logo for client compatibility (SVG is often blocked or broken in email).
  */
 function resolveEmailBrandImageUrls(): { logo: string | null; wordmark: string | null } {
-  const origin = getFrontendOriginForEmail();
+  const origin = getEmailAssetsOrigin();
   const explicitLogo = env.EMAIL_LOGO_URL?.trim();
   if (/^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(origin ?? "")) {
     return { logo: explicitLogo || null, wordmark: null };

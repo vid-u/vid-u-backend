@@ -21,8 +21,13 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   /** From address Resend accepts (verified domain or onboarding@resend.dev for testing). */
   RESEND_FROM_EMAIL: z.string().min(1).optional(),
-  /** Absolute URL for the logo in HTML emails (optional; else first `FRONTEND_URL` origin + `/email-logo.svg`). */
+  /** Absolute URL for the logo in HTML emails (optional; overrides default raster logo path). */
   EMAIL_LOGO_URL: z.string().url().optional(),
+  /**
+   * Origin where `/bughyve-logo.jpg` and `/bughyve-wordmark.jpeg` are hosted (e.g. https://bughyve.com).
+   * Use when `FRONTEND_URL`’s first entry is the API or another host that does not serve those static files.
+   */
+  EMAIL_ASSETS_ORIGIN: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
