@@ -72,7 +72,10 @@ function getEmailAssetsOrigin(): string | null {
  * Public URLs for brand images in HTML email (served from the landing site `public/`, e.g. bughyve.com).
  * Uses raster logo for client compatibility (SVG is often blocked or broken in email).
  */
-function resolveEmailBrandImageUrls(): { logo: string | null; wordmark: string | null } {
+function resolveEmailBrandImageUrls(): {
+  logo: string | null;
+  wordmark: string | null;
+} {
   const origin = getEmailAssetsOrigin();
   const explicitLogo = env.EMAIL_LOGO_URL?.trim();
   if (/^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(origin ?? "")) {
@@ -95,7 +98,7 @@ function emailBrandHeaderHtml(): string {
   if (!logo && !wordmark) return "";
   const logoCell = logo
     ? `<td style="vertical-align:middle;padding:0;">
-  <img src="${escapeAttr(logo)}" alt="BugHyve" width="52" role="presentation" style="display:block;width:52px;height:auto;border:0;outline:none;text-decoration:none;" />
+  <img src="${escapeAttr(logo)}" alt="BugHyve" width="60" role="presentation" style="display:block;width:60px;height:auto;border:0;outline:none;text-decoration:none;" />
 </td>`
     : "";
   const wordmarkCell = wordmark
