@@ -72,7 +72,6 @@ docker compose up -d
 | ------------------------- | -------------------------------------------------------------------------- |
 | `npm run dev`             | Dev server with reload (`tsx watch`)                                       |
 | `npm run build`           | Compile to `dist/`                                                         |
-| `npm start`               | Run compiled app                                                           |
-| `npm run start:deploy`    | `prisma migrate deploy` then `node dist/index.js` (typical for production) |
+| `npm start`               | `prisma migrate deploy` then run compiled app (production / Railway default) |
 | `npm run prisma:migrate`  | `prisma migrate dev`                                                       |
 | `npm run prisma:generate` | Regenerate Prisma Client after schema changes                              |

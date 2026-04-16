@@ -31,16 +31,16 @@ Use the same source folder for both: `bughyve-solana-hackathon/bughyve-backend-s
 - Build:
 
 ```bash
-npm ci && npx prisma generate && npm run build
+npm ci && npm run build
 ```
 
-- Start (recommended — applies pending migrations, then boots the server):
+- Start (default **`npm start`** — applies pending migrations, then boots the server):
 
 ```bash
-npm run start:deploy
+npm start
 ```
 
-To run migrations manually instead, keep **`npm run start`** as the start command and run `npx prisma migrate deploy` from a shell or CI when you ship schema changes.
+To boot **without** migrating (advanced), set the start command to **`node dist/index.js`** and run **`npx prisma migrate deploy`** from a shell or CI when you ship schema changes.
 
 ### Environment variables
 
@@ -65,7 +65,7 @@ Never commit secrets to git.
 
 ## 4. Production migrations
 
-**Automated (on each deploy):** Set the service **Start Command** to **`npm run start:deploy`**. On every successful build, Railway runs that script: it executes **`prisma migrate deploy`** (applies any pending migrations) and then **`node dist/index.js`**. Pushing a commit that includes new migration files will migrate prod DB before the new code serves traffic.
+**Automated (on each deploy):** Use the default **Start Command** **`npm start`**. Each boot runs **`prisma migrate deploy`** (applies any pending migrations) and then **`node dist/index.js`**. Pushing a commit that includes new migration files will migrate the prod DB when the new container starts.
 
 **Caveats:**
 
@@ -127,7 +127,7 @@ The app reads `FRONTEND_URL` (comma-separated). Add every production and preview
 
 - [ ] `bughyve-api` deployed and healthy
 - [ ] `NODE_ENV=production`
-- [ ] Migrations apply on deploy (`start:deploy`) or you ran `prisma migrate deploy` manually
+- [ ] Migrations apply on deploy (`npm start`) or you ran `prisma migrate deploy` manually
 - [ ] `CRON_SECRET` set on both API and cron services
 - [ ] Railway cron schedule active
 - [ ] CORS origins correct for frontend domain(s)
