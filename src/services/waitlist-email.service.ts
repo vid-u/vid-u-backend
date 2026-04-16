@@ -44,29 +44,42 @@ function getFrontendOriginForEmail(): string | null {
   return first.replace(/\/+$/, "");
 }
 
-/** Public URL for the BugHyve logo in transactional HTML (same asset as landing `public/email-logo.svg`). */
-function resolveEmailLogoUrl(): string | null {
-  const explicit = env.EMAIL_LOGO_URL?.trim();
-  if (explicit) return explicit;
+/**
+ * Public URLs for brand images in HTML email (served from the landing site `public/`, e.g. bughyve.com).
+ * Uses raster logo for client compatibility (SVG is often blocked or broken in email).
+ */
+function resolveEmailBrandImageUrls(): { logo: string | null; wordmark: string | null } {
   const origin = getFrontendOriginForEmail();
-  if (!origin) return null;
-  // Recipients' mail clients cannot load localhost; use text fallback unless EMAIL_LOGO_URL is set.
-  if (/^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(origin)) return null;
-  return `${origin}/email-logo.svg`;
-}
-
-/** Hidden preheader so inbox snippets show real copy instead of layout/logo bits. */
-function emailPreheaderHtml(): string {
-  return `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;color:transparent;width:0;height:0;">
-Hey, I&apos;m Franz — founder of BugHyve.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>`;
+  const explicitLogo = env.EMAIL_LOGO_URL?.trim();
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(origin ?? "")) {
+    return { logo: explicitLogo || null, wordmark: null };
+  }
+  if (!origin) {
+    return {
+      logo: explicitLogo || null,
+      wordmark: null,
+    };
+  }
+  return {
+    logo: explicitLogo || `${origin}/bughyve-logo.jpg`,
+    wordmark: `${origin}/bughyve-wordmark.jpeg`,
+  };
 }
 
 function emailBrandHeaderHtml(): string {
-  const src = resolveEmailLogoUrl();
-  if (!src) return "";
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;border-collapse:collapse;"><tr><td>
-  <img src="${escapeAttr(src)}" alt="" width="200" role="presentation" style="display:block;max-width:220px;width:200px;height:auto;border:0;outline:none;text-decoration:none;" />
-</td></tr></table>`;
+  const { logo, wordmark } = resolveEmailBrandImageUrls();
+  if (!logo && !wordmark) return "";
+  const logoCell = logo
+    ? `<td style="vertical-align:middle;padding:0;">
+  <img src="${escapeAttr(logo)}" alt="BugHyve" width="52" role="presentation" style="display:block;width:52px;height:auto;border:0;outline:none;text-decoration:none;" />
+</td>`
+    : "";
+  const wordmarkCell = wordmark
+    ? `<td style="vertical-align:middle;padding:0 0 0 14px;">
+  <img src="${escapeAttr(wordmark)}" alt="BugHyve" width="200" role="presentation" style="display:block;max-width:220px;width:200px;height:auto;border:0;outline:none;text-decoration:none;" />
+</td>`
+    : "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;border-collapse:collapse;"><tr>${logoCell}${wordmarkCell}</tr></table>`;
 }
 
 function emailBrandHeaderText(): string {
@@ -95,7 +108,6 @@ function buildClientEmail(_toEmail: string): {
 <html lang="en">
 <head><meta charset="utf-8" /></head>
 <body style="margin:0;padding:24px;font-family:ui-sans-serif,system-ui,sans-serif;line-height:1.6;color:#1a1a1a;background:#faf9f6;">
-  ${emailPreheaderHtml()}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="max-width:560px;margin:0 auto;">
     ${emailBrandHeaderHtml()}
     <p style="margin:0 0 16px;font-size:15px;">Hey,</p>
@@ -150,7 +162,6 @@ function buildTesterEmail(_toEmail: string): {
 <html lang="en">
 <head><meta charset="utf-8" /></head>
 <body style="margin:0;padding:24px;font-family:ui-sans-serif,system-ui,sans-serif;line-height:1.6;color:#1a1a1a;background:#faf9f6;">
-  ${emailPreheaderHtml()}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="max-width:560px;margin:0 auto;">
     ${emailBrandHeaderHtml()}
     <p style="margin:0 0 16px;font-size:15px;">Hey,</p>
