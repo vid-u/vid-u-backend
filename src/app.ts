@@ -11,6 +11,7 @@ import { apiRouter } from "./routes/api.routes.js";
 
 export function createApp(): express.Application {
   const app = express();
+  app.set("trust proxy", 1);
 
   app.use(helmet());
   app.use(
@@ -35,7 +36,7 @@ export function createApp(): express.Application {
         callback(new Error(`CORS blocked for origin: ${origin}`));
       },
       credentials: true,
-    })
+    }),
   );
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
