@@ -6,6 +6,7 @@ import {
 import { Prisma } from "../generated/prisma/client.js";
 import {
   serializeCampaignListPreview,
+  serializeClientCampaignListPreview,
   serializeCampaignUi,
 } from "../lib/campaign-ui.js";
 import {
@@ -24,14 +25,20 @@ import type {
 } from "../validation/campaign.schema.js";
 import type { ListCampaignsOptions } from "../types/campaign.types.js";
 import type { ViewerContext } from "../types/viewer.types.js";
-import { ForbiddenError, NotFoundError, ValidationError } from "../utils/errors.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from "../utils/errors.js";
 
 const campaignInclude = {
   client: { include: { clientProfile: true } },
   _count: { select: { submissions: true } },
 } as const;
 
-type CampaignUiRow = Prisma.CampaignGetPayload<{ include: typeof campaignInclude }>;
+type CampaignUiRow = Prisma.CampaignGetPayload<{
+  include: typeof campaignInclude;
+}>;
 
 /** Distinct `testerId` count per campaign (for `uniqueTestersCount`). */
 async function uniqueTesterCountsByCampaignIds(
@@ -52,8 +59,10 @@ async function uniqueTesterCountsByCampaignIds(
 
 function rowToUi(row: CampaignUiRow, uniqueTestersCount: number) {
   const companyName = row.client?.clientProfile?.companyName ?? "Unknown";
+  const logoUrl = row.client?.clientProfile?.logoUrl ?? null;
   return serializeCampaignUi(row, {
     companyName,
+    logoUrl,
     submissionsCount: row._count.submissions,
     uniqueTestersCount,
   });
@@ -153,9 +162,7 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
   const { page, limit, status, devices, q, sort } = query;
   const offset = pageToOffset(page, limit);
 
-  const statusFilter:
-    | Prisma.EnumCampaignStatusFilter
-    | CampaignStatus =
+  const statusFilter: Prisma.EnumCampaignStatusFilter | CampaignStatus =
     status === "all"
       ? {
           in: [
@@ -174,9 +181,7 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
     listed: true,
     escrowPda: { not: null },
     status: statusFilter,
-    ...(devices.length > 0
-      ? { deviceRequirements: { hasSome: devices } }
-      : {}),
+    ...(devices.length > 0 ? { deviceRequirements: { hasSome: devices } } : {}),
     ...(q
       ? {
           OR: [
@@ -209,10 +214,11 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
   ]);
 
   const ids = rows.map((r) => r.id);
-  const [{ submissionTotals, paidByCampaign }, testerCounts] = await Promise.all([
-    previewStatsForCampaignIds(ids),
-    uniqueTesterCountsByCampaignIds(ids),
-  ]);
+  const [{ submissionTotals, paidByCampaign }, testerCounts] =
+    await Promise.all([
+      previewStatsForCampaignIds(ids),
+      uniqueTesterCountsByCampaignIds(ids),
+    ]);
 
   const campaigns = rows.map((row) => {
     const companyName = row.client?.clientProfile?.companyName ?? "Unknown";
@@ -232,7 +238,7 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
   };
 }
 
-/** Client’s campaigns — full `serializeCampaignUi` rows (not public card previews). */
+/** Client’s campaigns — list card previews (same narrow shape as public `/campaigns`, plus `listed` / `escrowPda`; `stats.totalBudget` = funded USDC). */
 export async function listCampaigns(opts: ListCampaignsOptions) {
   if (!opts.mine) {
     throw new ForbiddenError("Use listPublicCampaigns for public browse");
@@ -252,11 +258,26 @@ export async function listCampaigns(opts: ListCampaignsOptions) {
       orderBy: { updatedAt: "desc" },
       skip: offset,
       take: limit,
-      include: campaignInclude,
+      include: publicListInclude,
     }),
   ]);
-  const counts = await uniqueTesterCountsByCampaignIds(rows.map((r) => r.id));
-  const campaigns = rows.map((r) => rowToUi(r, counts.get(r.id) ?? 0));
+  const ids = rows.map((r) => r.id);
+  const [{ submissionTotals }, testerCounts] = await Promise.all([
+    previewStatsForCampaignIds(ids),
+    uniqueTesterCountsByCampaignIds(ids),
+  ]);
+
+  const campaigns = rows.map((row) => {
+    const companyName = row.client?.clientProfile?.companyName ?? "Unknown";
+    const logoUrl = row.client?.clientProfile?.logoUrl;
+    return serializeClientCampaignListPreview(row, {
+      companyName,
+      logoUrl,
+      testers: testerCounts.get(row.id) ?? 0,
+      submissions: submissionTotals.get(row.id) ?? 0,
+      totalBudget: Number(dec(row.budget) ?? "0"),
+    });
+  });
   return {
     campaigns,
     meta: buildPaginationMeta(page, limit, total),
@@ -284,7 +305,8 @@ export async function getCampaignForViewer(
     const ok =
       c.listed &&
       c.escrowPda != null &&
-      (c.status === CampaignStatus.active || c.status === CampaignStatus.paused);
+      (c.status === CampaignStatus.active ||
+        c.status === CampaignStatus.paused);
     if (!ok) throw new ForbiddenError("Campaign is not visible to testers");
     return rowToUi(c, uniqueTestersCount);
   }
@@ -317,15 +339,31 @@ export async function patchCampaign(
   });
   if (!c) throw new NotFoundError("Campaign not found");
 
+  if (
+    data.status !== undefined &&
+    c.status === CampaignStatus.draft &&
+    (data.status === CampaignStatus.active ||
+      data.status === CampaignStatus.paused ||
+      data.status === CampaignStatus.ended)
+  ) {
+    throw new ValidationError(
+      "Cannot change status from draft until the campaign is funded. Fund the campaign first.",
+    );
+  }
+
   if (data.listed === true && !c.escrowPda) {
-    throw new ValidationError("Cannot list campaign until escrow is initialized (escrow_pda set)");
+    throw new ValidationError(
+      "Fund your campaign to initialize escrow before listing.",
+    );
   }
 
   await prisma.campaign.update({
     where: { id: campaignId },
     data: {
       ...(data.title !== undefined ? { title: data.title } : {}),
-      ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(data.description !== undefined
+        ? { description: data.description }
+        : {}),
       ...(data.scope !== undefined ? { scope: data.scope } : {}),
       ...(data.outOfScope !== undefined ? { outOfScope: data.outOfScope } : {}),
       ...(data.inScopeTestCaseUrl !== undefined
@@ -343,7 +381,9 @@ export async function patchCampaign(
       ...(data.startDate !== undefined
         ? { startDate: parseOptionalDate(data.startDate) }
         : {}),
-      ...(data.endDate !== undefined ? { endDate: parseOptionalDate(data.endDate) } : {}),
+      ...(data.endDate !== undefined
+        ? { endDate: parseOptionalDate(data.endDate) }
+        : {}),
       ...(data.isApproved !== undefined ? { isApproved: data.isApproved } : {}),
       ...(data.deviceRequirements !== undefined
         ? { deviceRequirements: data.deviceRequirements }
@@ -373,6 +413,9 @@ export async function fundCampaign(
     where: { id: campaignId, clientId },
   });
   if (!c) throw new NotFoundError("Campaign not found");
+  if (c.escrowPda) {
+    throw new ValidationError("Campaign is already funded");
+  }
 
   const funded = toDecimal(input.fundedUsdc);
   const creationFee = toDecimal("25");
@@ -435,7 +478,7 @@ export async function topUpCampaign(
       budgetRemaining: c.budgetRemaining.plus(add),
       availableBalance: c.availableBalance.plus(add),
       status:
-        c.status === CampaignStatus.paused ? CampaignStatus.active : c.status,
+        c.status === CampaignStatus.ended ? CampaignStatus.active : c.status,
     },
   });
 
@@ -457,7 +500,7 @@ export async function closeCampaign(
   if (!c) throw new NotFoundError("Campaign not found");
   if (c.allocatedBalance.gt(0)) {
     throw new ValidationError(
-      "Cannot close while submissions have allocated funds — resolve submissions first"
+      "Cannot close while submissions have allocated funds — resolve submissions first",
     );
   }
 

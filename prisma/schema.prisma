@@ -83,7 +83,6 @@ model User {
 model ClientProfile {
   userId        String   @id @map("user_id") @db.Uuid
   companyName   String   @map("company_name")
-  contactPerson String?  @map("contact_person")
   description   String?
   logoUrl       String?  @map("logo_url")
   contactEmail  String?  @map("contact_email")
@@ -109,9 +108,7 @@ model TesterWorkPreferences {
 
 model TesterAvailability {
   userId                  String   @id @map("user_id") @db.Uuid
-  availabilityToStart     String?  @map("availability_to_start")
   preferredTimeCommitment String?  @map("preferred_time_commitment")
-  customDays              String?  @map("custom_days")
   workingHours            Json?    @map("working_hours")
   updatedAt               DateTime @updatedAt @map("updated_at")
 

@@ -2,7 +2,6 @@ import { z } from "zod";
 
 export const patchClientProfileBody = z.object({
   companyName: z.string().min(1).max(500).optional(),
-  contactPerson: z.string().max(200).optional(),
   contactEmail: z.string().email().max(320).optional().or(z.literal("")),
   description: z.string().max(5000).optional(),
   websiteUrl: z.string().max(2000).optional(),
@@ -38,17 +37,12 @@ export const patchWorkPreferencesBody = z.object({
 /** Tester — `PATCH /availability`. */
 export const patchAvailabilityBody = z
   .object({
-    availabilityToStart: z.string().optional(),
-    customDays: z.string().optional(),
     preferredTimeCommitment: z.string().optional(),
     workingHours: z.record(z.array(timeSlot)).optional(),
   })
   .refine(
     (d) =>
-      d.availabilityToStart !== undefined ||
-      d.customDays !== undefined ||
-      d.preferredTimeCommitment !== undefined ||
-      d.workingHours !== undefined,
+      d.preferredTimeCommitment !== undefined || d.workingHours !== undefined,
     { message: "At least one field is required" },
   );
 

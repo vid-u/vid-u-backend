@@ -293,7 +293,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"availabilityToStart\": \"1-week\",\n  \"preferredTimeCommitment\": \"10h/week\",\n  \"workingHours\": {\n    \"monday\": [\n      { \"start\": \"09:00\", \"end\": \"12:00\" },\n      { \"start\": \"13:00\", \"end\": \"17:00\" }\n    ],\n    \"tuesday\": [],\n    \"wednesday\": [{ \"start\": \"10:00\", \"end\": \"15:00\" }]\n  }\n}",
+                  "raw": "{\n  \"preferredTimeCommitment\": \"10h/week\",\n  \"workingHours\": {\n    \"monday\": [\n      { \"start\": \"09:00\", \"end\": \"12:00\" },\n      { \"start\": \"13:00\", \"end\": \"17:00\" }\n    ],\n    \"tuesday\": [],\n    \"wednesday\": [{ \"start\": \"10:00\", \"end\": \"15:00\" }]\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -301,7 +301,7 @@
                   }
                 },
                 "url": "{{baseUrl}}/availability",
-                "description": "Requires **tester** role. **At least one** field required. Partial update: only sent keys are applied (upsert)."
+                "description": "Requires **tester** role. Body may include `preferredTimeCommitment` and/or `workingHours`. **At least one** field required. Partial update: only sent keys are applied (upsert)."
               },
               "response": [
                 {
@@ -886,7 +886,7 @@
                   }
                 ],
                 "url": "{{baseUrl}}/client/profile",
-                "description": "Requires **client** role. Creates default client profile row if missing. **`data`** — `companyName`, `contactPerson`, `description`, `contactEmail`, `websiteUrl`, `logoUrl` (null when unset)."
+                "description": "Requires **client** role. Creates default client profile row if missing. **`data`** — `companyName`, `description`, `contactEmail`, `websiteUrl`, `logoUrl` (null when unset)."
               },
               "response": [
                 {
@@ -894,7 +894,7 @@
                   "status": "OK",
                   "code": 200,
                   "_postman_previewlanguage": "json",
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"companyName\": \"My organization\",\n    \"contactPerson\": null,\n    \"description\": null,\n    \"contactEmail\": \"client@example.com\",\n    \"websiteUrl\": null,\n    \"logoUrl\": null\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"companyName\": \"My organization\",\n    \"description\": null,\n    \"contactEmail\": \"client@example.com\",\n    \"websiteUrl\": null,\n    \"logoUrl\": null\n  }\n}"
                 }
               ]
             },
@@ -929,7 +929,7 @@
                   "status": "OK",
                   "code": 200,
                   "_postman_previewlanguage": "json",
-                  "body": "{\n  \"success\": true,\n  \"message\": \"updated\",\n  \"data\": {\n    \"companyName\": \"Acme Security\",\n    \"contactPerson\": null,\n    \"description\": \"We build wallets.\",\n    \"contactEmail\": \"security@acme.com\",\n    \"websiteUrl\": \"https://acme.com\",\n    \"logoUrl\": \"https://cdn.example.com/logo.png\"\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"updated\",\n  \"data\": {\n    \"companyName\": \"Acme Security\",\n    \"description\": \"We build wallets.\",\n    \"contactEmail\": \"security@acme.com\",\n    \"websiteUrl\": \"https://acme.com\",\n    \"logoUrl\": \"https://cdn.example.com/logo.png\"\n  }\n}"
                 }
               ]
             }
@@ -1034,7 +1034,7 @@
                   }
                 ],
                 "url": "{{baseUrl}}/client/campaigns/list?page=1&limit=10",
-                "description": "Paginated list of the client’s campaigns (`serializeCampaignUi` rows). Query: `page` (default 1), `limit` (default 10, max 100). Response `data` is the array; `meta` matches other list endpoints."
+                "description": "Paginated list-card previews (same narrow shape as public `GET /campaigns`, plus `listed` and `escrowPda`). Each item includes `stats.testers`, `stats.submissions`, and `stats.totalBudget` (funded USDC / DB `budget`). Query: `page` (default 1), `limit` (default 10, max 100). Response `data` is the array; `meta` matches other list endpoints."
               },
               "response": [
                 {
@@ -1043,6 +1043,13 @@
                   "code": 200,
                   "_postman_previewlanguage": "json",
                   "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [],\n  \"meta\": {\n    \"page\": 1,\n    \"current_page\": 1,\n    \"limit\": 10,\n    \"items_per_page\": 10,\n    \"total\": 0,\n    \"total_items\": 0,\n    \"total_pages\": 0\n  }\n}"
+                },
+                {
+                  "name": "200 OK — sample card",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"bea720db-91ee-4176-b5d6-6af80a3735d6\",\n      \"title\": \"BugHyve web — staging regression (Q2 escrow refresh)\",\n      \"company\": \"My organization\",\n      \"status\": \"active\",\n      \"description\": \"Short preview uses full description from DB…\",\n      \"deviceRequirements\": [\"iphone\", \"ipad\", \"mac\"],\n      \"createdAt\": \"2026-04-17T23:36:46.839Z\",\n      \"listed\": true,\n      \"escrowPda\": \"StubEscrowPda…\",\n      \"stats\": {\n        \"testers\": 0,\n        \"submissions\": 0,\n        \"totalBudget\": 1000\n      }\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"current_page\": 1,\n    \"limit\": 10,\n    \"items_per_page\": 10,\n    \"total\": 1,\n    \"total_items\": 1,\n    \"total_pages\": 1\n  }\n}"
                 },
                 {
                   "name": "403 list requires client",
@@ -1069,7 +1076,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"New campaign\",\n  \"description\": \"Required long description of the product under test.\",\n  \"scope\": \"In-scope markdown (maps to testScope in API responses).\",\n  \"outOfScope\": \"Required out-of-scope rules (e.g. no load testing, no third-party APIs).\",\n  \"inScopeTestCaseUrl\": \"https://docs.example.com/tests\",\n  \"downloadLinks\": {\n    \"ios\": \"https://apps.apple.com/app/example/id000000\",\n    \"android\": \"https://play.google.com/store/apps/details?id=com.example\",\n    \"web\": \"https://app.example.com\",\n    \"windows\": \"https://example.com/download/windows\",\n    \"mac\": \"https://example.com/download/mac\",\n    \"cli\": \"https://github.com/example/cli/releases\"\n  },\n  \"startDate\": \"2026-04-01\",\n  \"endDate\": \"2026-06-30\",\n  \"deviceRequirements\": [\"mac\", \"windows\"],\n  \"visibility\": \"private\",\n  \"reviewWindowDays\": 7,\n  \"severityRewards\": {\n    \"critical\": { \"min\": \"100\", \"max\": \"500\" },\n    \"high\": { \"min\": \"50\", \"max\": \"200\" },\n    \"medium\": { \"min\": \"20\", \"max\": \"80\" },\n    \"mild\": { \"min\": \"5\", \"max\": \"25\" }\n  }\n}",
+                  "raw": "{\n  \"title\": \"New campaign\",\n  \"description\": \"Required long description of the product under test.\",\n  \"scope\": \"In-scope markdown (maps to testScope in API responses).\",\n  \"outOfScope\": \"Required out-of-scope rules (e.g. no load testing, no third-party APIs).\",\n  \"inScopeTestCaseUrl\": \"https://docs.example.com/tests\",\n  \"downloadLinks\": {\n    \"ios\": \"\",\n    \"android\": \"\",\n    \"web\": \"https://app.example.com\",\n    \"windows\": \"\",\n    \"mac\": \"\",\n    \"cli\": \"\"\n  },\n  \"startDate\": \"2026-04-01\",\n  \"endDate\": \"2026-06-30\",\n  \"deviceRequirements\": [\"mac\", \"windows\"],\n  \"reviewWindowDays\": 7,\n  \"severityRewards\": {\n    \"critical\": { \"min\": \"100\", \"max\": \"500\" },\n    \"high\": { \"min\": \"50\", \"max\": \"200\" },\n    \"medium\": { \"min\": \"20\", \"max\": \"80\" },\n    \"mild\": { \"min\": \"5\", \"max\": \"25\" }\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
