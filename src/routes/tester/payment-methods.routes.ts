@@ -12,26 +12,37 @@ import {
 
 export const paymentMethodsRouter = Router();
 
-/** Same handlers as `/client/payment-methods` — clients only (`clientPaymentMethod` rows). */
+/**
+ * Top-level `/payment-methods` — **tester** role. Same storage as client (`client_payment_methods` by `userId`);
+ * clients use `/client/payment-methods` (client role only).
+ */
 paymentMethodsRouter.get(
   "/",
   authenticate,
-  requireRole(UserRole.client),
+  requireRole(UserRole.tester),
   asyncHandler(paymentMethodController.getPaymentMethods),
 );
 
 paymentMethodsRouter.post(
   "/add",
   authenticate,
-  requireRole(UserRole.client),
+  requireRole(UserRole.tester),
   validateBody(addPaymentMethodBody),
   asyncHandler(paymentMethodController.postPaymentMethod),
+);
+
+paymentMethodsRouter.post(
+  "/:id/default",
+  authenticate,
+  requireRole(UserRole.tester),
+  validateParams(paymentMethodIdParams),
+  asyncHandler(paymentMethodController.postPaymentMethodDefault),
 );
 
 paymentMethodsRouter.delete(
   "/:id",
   authenticate,
-  requireRole(UserRole.client),
+  requireRole(UserRole.tester),
   validateParams(paymentMethodIdParams),
   asyncHandler(paymentMethodController.deletePaymentMethod),
 );

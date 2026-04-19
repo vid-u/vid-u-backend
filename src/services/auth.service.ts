@@ -1,6 +1,7 @@
 import { UserRole } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import type { SyncUserInput } from "../types/auth.types.js";
+import { ensureInitialPrimaryPaymentMethod } from "./payment-method.service.js";
 import { ConflictError } from "../utils/errors.js";
 
 export async function syncUserFromSession(
@@ -31,6 +32,8 @@ export async function syncUserFromSession(
       ...(input.role !== undefined ? { role: input.role } : {}),
     },
   });
+
+  await ensureInitialPrimaryPaymentMethod(user.id, user.walletAddress);
 
   return {
     user: {

@@ -34,7 +34,6 @@ export async function getClientProfilePayload(
   const contactEmail = p.contactEmail ?? email ?? null;
   return {
     companyName: p.companyName,
-    contactPerson: p.contactPerson ?? null,
     description: p.description ?? null,
     contactEmail: contactEmail === "" ? null : contactEmail,
     websiteUrl: p.websiteUrl ?? null,
@@ -52,7 +51,6 @@ export async function updateClientProfile(
     create: {
       userId,
       companyName: data.companyName ?? "My organization",
-      contactPerson: data.contactPerson,
       contactEmail: data.contactEmail ?? email ?? null,
       description: data.description,
       websiteUrl: data.websiteUrl,
@@ -60,7 +58,6 @@ export async function updateClientProfile(
     },
     update: {
       ...(data.companyName !== undefined ? { companyName: data.companyName } : {}),
-      ...(data.contactPerson !== undefined ? { contactPerson: data.contactPerson } : {}),
       ...(data.contactEmail !== undefined ? { contactEmail: data.contactEmail || null } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
       ...(data.websiteUrl !== undefined ? { websiteUrl: data.websiteUrl } : {}),
@@ -150,8 +147,6 @@ export async function getAvailabilityPayload(userId: string) {
   return {
     availability: row
       ? {
-          availabilityToStart: row.availabilityToStart,
-          customDays: row.customDays,
           preferredTimeCommitment: row.preferredTimeCommitment,
           workingHours: row.workingHours as Record<
             string,
@@ -173,16 +168,10 @@ export async function updateAvailability(
     where: { userId },
     create: {
       userId,
-      availabilityToStart: data.availabilityToStart,
-      customDays: data.customDays,
       preferredTimeCommitment: data.preferredTimeCommitment,
       workingHours: wh ?? Prisma.JsonNull,
     },
     update: {
-      ...(data.availabilityToStart !== undefined
-        ? { availabilityToStart: data.availabilityToStart }
-        : {}),
-      ...(data.customDays !== undefined ? { customDays: data.customDays } : {}),
       ...(data.preferredTimeCommitment !== undefined
         ? { preferredTimeCommitment: data.preferredTimeCommitment }
         : {}),
@@ -194,8 +183,6 @@ export async function updateAvailability(
 
   return {
     availability: {
-      availabilityToStart: upserted.availabilityToStart,
-      customDays: upserted.customDays,
       preferredTimeCommitment: upserted.preferredTimeCommitment,
       workingHours: upserted.workingHours as Record<
         string,
