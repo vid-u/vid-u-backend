@@ -8,8 +8,6 @@
 - [ ]
 - [ ]
 
-**Related ticket(s):** <!-- e.g. Fixes <Ticket Link> -->
-
 ## Verification Proof
 
 - [ ] I verified this change locally
