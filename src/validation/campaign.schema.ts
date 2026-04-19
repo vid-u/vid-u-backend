@@ -57,17 +57,33 @@ const optionalEndDate = z.preprocess(
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 );
 
-const createCampaignUrlField = z.string().trim().min(1).url().max(2000);
+/** Empty string or a valid http(s) URL (unused platforms may be left blank). */
+const createCampaignOptionalAppLink = z.preprocess(
+  (v) => (v === "" || v === undefined || v === null ? "" : String(v).trim()),
+  z.union([z.literal(""), z.string().url().max(2000)]),
+);
 
-/** Matches create-campaign UI: every platform link row is required. */
-export const createCampaignDownloadLinks = z.object({
-  ios: createCampaignUrlField,
-  android: createCampaignUrlField,
-  web: createCampaignUrlField,
-  windows: createCampaignUrlField,
-  mac: createCampaignUrlField,
-  cli: createCampaignUrlField,
-});
+/** At least one non-empty platform link required; others optional. */
+export const createCampaignDownloadLinks = z
+  .object({
+    ios: createCampaignOptionalAppLink,
+    android: createCampaignOptionalAppLink,
+    web: createCampaignOptionalAppLink,
+    windows: createCampaignOptionalAppLink,
+    mac: createCampaignOptionalAppLink,
+    cli: createCampaignOptionalAppLink,
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    const hasAny = Object.values(data).some((v) => v !== "");
+    if (!hasAny) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At least one application link is required",
+        path: ["ios"],
+      });
+    }
+  });
 
 const createSeverityRewardsTier = z
   .object({
@@ -79,12 +95,48 @@ const createSeverityRewardsTier = z
     message: "Each severity tier must have 0 ≤ min ≤ max",
   });
 
-export const createCampaignSeverityRewards = z.object({
-  mild: createSeverityRewardsTier,
-  medium: createSeverityRewardsTier,
-  high: createSeverityRewardsTier,
-  critical: createSeverityRewardsTier,
-});
+/** Interior overlap of closed USDC intervals (sharing only an endpoint is allowed). */
+function bountyIntervalsOverlapInterior(
+  aLo: number,
+  aHi: number,
+  bLo: number,
+  bHi: number,
+): boolean {
+  return Math.max(aLo, bLo) < Math.min(aHi, bHi);
+}
+
+function severityLabel(key: string): string {
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+export const createCampaignSeverityRewards = z
+  .object({
+    mild: createSeverityRewardsTier,
+    medium: createSeverityRewardsTier,
+    high: createSeverityRewardsTier,
+    critical: createSeverityRewardsTier,
+  })
+  .superRefine((sr, ctx) => {
+    const tiers = [
+      { key: "mild" as const, ...sr.mild },
+      { key: "medium" as const, ...sr.medium },
+      { key: "high" as const, ...sr.high },
+      { key: "critical" as const, ...sr.critical },
+    ];
+    for (let i = 0; i < tiers.length; i++) {
+      for (let j = i + 1; j < tiers.length; j++) {
+        const a = tiers[i];
+        const b = tiers[j];
+        if (bountyIntervalsOverlapInterior(a.min, a.max, b.min, b.max)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${severityLabel(a.key)} (${a.min}–${a.max} USDC) overlaps ${severityLabel(b.key)} (${b.min}–${b.max} USDC); bounty ranges must not overlap`,
+            path: [a.key, "min"],
+          });
+        }
+      }
+    }
+  });
 
 /**
  * `POST /client/campaigns/create` — strict body.
@@ -107,8 +159,8 @@ export const createCampaignBody = z
     endDate: optionalEndDate,
     isApproved: z.boolean().optional(),
     deviceRequirements: z.array(deviceRequirementIdSchema).min(1),
-    visibility: z.enum(["private", "public", "restricted"]).default("private"),
-    reviewWindowDays: z.number().int().min(1).max(365).default(7),
+    visibility: z.enum(["private", "public", "restricted"]).default("public"),
+    reviewWindowDays: z.number().int().min(1).max(14).default(7),
     severityRewards: createCampaignSeverityRewards,
   })
   .strict()
@@ -171,7 +223,7 @@ export const listCampaignsQuery = z.object({
   mine: z.enum(["true", "false"]).optional(),
 });
 
-/** `GET /client/campaigns/list` — paginated full campaign rows for the authenticated client. */
+/** `GET /client/campaigns/list` — paginated list-card previews for the authenticated client (narrow payload, aligned with public `/campaigns`). */
 export const listClientCampaignsQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),

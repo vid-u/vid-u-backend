@@ -492,7 +492,15 @@ export async function createSubmission(
   });
   if (!campaign) throw new NotFoundError("Campaign not found");
   if (campaign.status !== CampaignStatus.active) {
-    throw new ValidationError("Campaign is not accepting submissions");
+    const msg =
+      campaign.status === CampaignStatus.paused
+        ? "Campaign is paused and is not accepting submissions"
+        : campaign.status === CampaignStatus.ended
+          ? "Campaign has ended and is not accepting submissions"
+          : campaign.status === CampaignStatus.draft
+            ? "Campaign is not yet accepting submissions"
+            : "Campaign is not accepting submissions";
+    throw new ValidationError(msg);
   }
   if (!campaign.escrowPda) {
     throw new ValidationError("Campaign escrow not initialized");

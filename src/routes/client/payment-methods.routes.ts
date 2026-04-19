@@ -28,6 +28,14 @@ clientPaymentMethodsRouter.post(
   asyncHandler(paymentMethodController.postPaymentMethod),
 );
 
+clientPaymentMethodsRouter.post(
+  "/:id/default",
+  authenticate,
+  requireRole(UserRole.client),
+  validateParams(paymentMethodIdParams),
+  asyncHandler(paymentMethodController.postPaymentMethodDefault),
+);
+
 clientPaymentMethodsRouter.delete(
   "/:id",
   authenticate,

@@ -51,6 +51,8 @@ export function serializeCampaignUi(
   c: Campaign,
   opts: {
     companyName: string;
+    /** Client org logo from `client_profiles.logo_url`. */
+    logoUrl?: string | null;
     /** Total submissions (all kinds) for this campaign. */
     submissionsCount: number;
     /** Distinct testers who have submitted to this campaign. */
@@ -92,6 +94,7 @@ export function serializeCampaignUi(
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
     company: opts.companyName,
+    logoUrl: opts.logoUrl?.trim() ? opts.logoUrl.trim() : undefined,
     payoutStructure: severityRewardsToPayoutStructure(c.severityRewards),
     deviceRequirements: normalizeDeviceRequirements(c.deviceRequirements),
     submissionsCount: opts.submissionsCount,
@@ -144,6 +147,55 @@ export function serializeCampaignListPreview(
       testers: opts.testers,
       submissions: opts.submissions,
       totalPaid: opts.totalPaid,
+    },
+  };
+}
+
+/** `GET /client/campaigns/list` — same card shape as public browse, plus listing/escrow flags; `stats.totalBudget` = funded USDC (`campaign.budget`). */
+export type ClientCampaignListPreview = {
+  id: string;
+  title: string;
+  company: string;
+  logoUrl?: string;
+  status: string;
+  description: string;
+  deviceRequirements: DeviceRequirementId[];
+  createdAt: string;
+  listed: boolean;
+  escrowPda: string | null;
+  stats: {
+    testers: number;
+    submissions: number;
+    /** Funded campaign budget (USDC), same as DB `budget`. */
+    totalBudget: number;
+  };
+};
+
+export function serializeClientCampaignListPreview(
+  c: Campaign,
+  opts: {
+    companyName: string;
+    logoUrl?: string | null;
+    testers: number;
+    submissions: number;
+    totalBudget: number;
+  },
+): ClientCampaignListPreview {
+  return {
+    id: c.id,
+    title: c.title,
+    company: opts.companyName,
+    logoUrl: opts.logoUrl ?? undefined,
+    status: c.status,
+    description: c.description ?? "",
+    deviceRequirements: normalizeDeviceRequirements(c.deviceRequirements),
+    createdAt: c.createdAt.toISOString(),
+    listed: c.listed,
+    escrowPda: c.escrowPda,
+    stats: {
+      testers: opts.testers,
+      submissions: opts.submissions,
+      totalBudget: opts.totalBudget,
     },
   };
 }
