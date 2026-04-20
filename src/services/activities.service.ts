@@ -95,7 +95,6 @@ export async function getCampaignActivities(
         ...base,
         submission: {
           id: r.id,
-          title: r.submission_title ?? "",
           kind: r.submission_kind as "bug" | "feedback",
         },
       };

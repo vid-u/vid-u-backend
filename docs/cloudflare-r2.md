@@ -66,7 +66,7 @@ Body: `{ "objectKey": "<key>" }` — only for **evidence** keys under `campaigns
 | Key type | Tester | Client (campaign owner) |
 |----------|--------|-------------------------|
 | `campaigns/.../submissions/.../file` | Yes, if they submitted | Yes, if they own the campaign |
-| `campaigns/.../draft/.../file` | Yes, own draft only | No |
+| `campaigns/.../draft/.../file` | Yes, own draft folder only | Yes, if they own the campaign |
 
 Avatars and logos do **not** use this endpoint — use **`publicUrl`** from the presign response (or concatenate `R2_PUBLIC_BASE_URL` + `objectKey`).
 
@@ -78,4 +78,4 @@ If the browser PUTs directly to R2, configure **CORS** on the bucket for your ap
 
 - **403 on presigned PUT**: check token permissions, bucket name, and endpoint (`https://<ACCOUNT_ID>.r2.cloudflarestorage.com`).
 - **publicUrl 404 in browser**: public access not enabled for `avatars/` and `clients/`, or `R2_PUBLIC_BASE_URL` wrong.
-- **Evidence download forbidden**: user must be the submission’s tester or the campaign’s client; draft keys are tester-only.
+- **Evidence download forbidden**: user must be the submission’s tester or the campaign’s client; draft keys allow the same tester **or** the campaign client.

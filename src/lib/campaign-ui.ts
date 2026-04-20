@@ -57,6 +57,10 @@ export function serializeCampaignUi(
     submissionsCount: number;
     /** Distinct testers who have submitted to this campaign. */
     uniqueTestersCount: number;
+    /** Gross approved USDC from escrow (`submission.payout_amount` sum). Matches client dashboard “total paid”. */
+    totalPaid: number;
+    /** Sum of net payouts to testers (`payout.tester_amount`, completed). */
+    totalPaidToTesters: number;
   },
 ) {
   const dl =
@@ -101,6 +105,8 @@ export function serializeCampaignUi(
     /* Same value as submissionsCount; kept for older clients. */
     bugsSubmitted: opts.submissionsCount,
     uniqueTestersCount: opts.uniqueTestersCount,
+    totalPaid: opts.totalPaid,
+    totalPaidToTesters: opts.totalPaidToTesters,
   };
 }
 
@@ -119,8 +125,10 @@ export type CampaignListPreview = {
     testers: number;
     /** All submissions (any kind). */
     submissions: number;
-    /** Sum of approved `payoutAmount` (USDC). */
+    /** Gross USDC approved from escrow (`submission.payout_amount` sum). */
     totalPaid: number;
+    /** Sum of net payouts to testers (`payout.tester_amount`), after platform fee. */
+    totalPaidToTesters: number;
   };
 };
 
@@ -132,6 +140,7 @@ export function serializeCampaignListPreview(
     testers: number;
     submissions: number;
     totalPaid: number;
+    totalPaidToTesters: number;
   },
 ): CampaignListPreview {
   return {
@@ -147,6 +156,7 @@ export function serializeCampaignListPreview(
       testers: opts.testers,
       submissions: opts.submissions,
       totalPaid: opts.totalPaid,
+      totalPaidToTesters: opts.totalPaidToTesters,
     },
   };
 }

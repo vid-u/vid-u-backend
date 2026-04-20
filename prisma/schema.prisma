@@ -38,8 +38,10 @@ enum SubmissionSeverity {
 }
 
 enum SubmissionStatus {
+  draft
   submitted
   in_review @map("in-review")
+  triaged
   approved
   rejected
   disputed

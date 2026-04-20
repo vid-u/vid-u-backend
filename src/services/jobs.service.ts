@@ -11,7 +11,13 @@ export async function runCheckExpired(): Promise<{
   const stuck = await prisma.submission.findMany({
     where: {
       expiresAt: { lt: now },
-      status: { in: [SubmissionStatus.submitted, SubmissionStatus.in_review] },
+      status: {
+        in: [
+          SubmissionStatus.submitted,
+          SubmissionStatus.in_review,
+          SubmissionStatus.triaged,
+        ],
+      },
     },
   });
 

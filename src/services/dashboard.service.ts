@@ -1,4 +1,4 @@
-import { SubmissionStatus } from "../generated/prisma/enums.js";
+import { PayoutStatus, SubmissionStatus } from "../generated/prisma/enums.js";
 import { dec, prisma } from "../lib/prisma.js";
 
 /** Client — `GET /client/dashboard` — metrics returned at top level of `data`. */
@@ -13,7 +13,13 @@ export async function getClientDashboard(clientId: string) {
       prisma.submission.count({
         where: {
           campaign: { clientId },
-          status: { in: [SubmissionStatus.submitted, SubmissionStatus.in_review] },
+          status: {
+            in: [
+              SubmissionStatus.submitted,
+              SubmissionStatus.in_review,
+              SubmissionStatus.triaged,
+            ],
+          },
         },
       }),
       prisma.submission.aggregate({
@@ -43,15 +49,19 @@ export async function getClientDashboard(clientId: string) {
 export async function getTesterDashboard(testerId: string) {
   const [totalEarningsAgg, forReview, approvedCount, rejectedCount] =
     await Promise.all([
-      prisma.submission.aggregate({
-        where: { testerId, status: SubmissionStatus.approved },
-        _sum: { payoutAmount: true },
+      prisma.payout.aggregate({
+        where: { testerId, status: PayoutStatus.completed },
+        _sum: { testerAmount: true },
       }),
       prisma.submission.count({
         where: {
           testerId,
           status: {
-            in: [SubmissionStatus.submitted, SubmissionStatus.in_review],
+            in: [
+              SubmissionStatus.submitted,
+              SubmissionStatus.in_review,
+              SubmissionStatus.triaged,
+            ],
           },
         },
       }),
@@ -63,8 +73,8 @@ export async function getTesterDashboard(testerId: string) {
       }),
     ]);
 
-  const totalEarnings = totalEarningsAgg._sum.payoutAmount
-    ? Number(dec(totalEarningsAgg._sum.payoutAmount))
+  const totalEarnings = totalEarningsAgg._sum.testerAmount
+    ? Number(dec(totalEarningsAgg._sum.testerAmount))
     : 0;
 
   const decided = approvedCount + rejectedCount;

@@ -1,7 +1,7 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
-import { CampaignStatus, UserRole } from "../generated/prisma/enums.js";
+import { CampaignStatus, SubmissionStatus, UserRole } from "../generated/prisma/enums.js";
 import { env } from "../lib/env.js";
 import { prisma } from "../lib/prisma.js";
 import type {
@@ -139,6 +139,14 @@ export async function presignUpload(
       if (!sub) {
         throw new ForbiddenError("Submission not found or not yours");
       }
+      if (sub.status !== SubmissionStatus.submitted) {
+        throw new ValidationError("Evidence upload is only allowed for submitted reports");
+      }
+      if (sub.evidenceUrls.length > 0) {
+        throw new ValidationError(
+          "Evidence is already attached; upload is only allowed before the first evidence patch",
+        );
+      }
       objectKey = `campaigns/${campaignId}/submissions/${input.submissionId}/${id}-${safe}`;
     } else {
       objectKey = `campaigns/${campaignId}/draft/${input.userId}/${id}-${safe}`;
@@ -209,12 +217,19 @@ export async function presignEvidenceDownload(
       throw new ForbiddenError("You cannot access this file");
     }
   } else if (draftMatch) {
-    const [, campaignId, testerId] = draftMatch;
-    if (input.role !== UserRole.tester || testerId !== input.userId) {
-      throw new ForbiddenError("Draft evidence is only accessible to the uploading tester");
-    }
+    const [, campaignId, draftTesterId] = draftMatch;
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new NotFoundError("Campaign not found");
+
+    const isUploadingTester =
+      input.role === UserRole.tester && draftTesterId === input.userId;
+    const isCampaignOwnerClient =
+      input.role === UserRole.client && campaign.clientId === input.userId;
+    if (!isUploadingTester && !isCampaignOwnerClient) {
+      throw new ForbiddenError(
+        "Draft evidence is only accessible to the uploading tester or the campaign client"
+      );
+    }
   } else {
     throw new ValidationError("Unsupported object key for download");
   }

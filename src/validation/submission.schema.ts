@@ -79,6 +79,11 @@ export const createSubmissionBody = z.union([
   createFeedbackSubmissionBody,
 ]);
 
+/** Tester — after `POST /submissions/create` and presigned PUTs under `campaigns/.../submissions/:id/`, persist keys. */
+export const patchTesterSubmissionEvidenceBody = z.object({
+  attachmentUrls: z.array(z.string().max(2000)).min(1).max(50),
+});
+
 export const submissionIdParams = z.object({
   id: uuidString,
 });
@@ -98,7 +103,9 @@ export const submissionStatusQueryParam = z.preprocess(
     if (raw === "in-review") return "in_review";
     return raw;
   },
-  z.enum(["submitted", "in_review", "approved", "rejected", "disputed"]).optional(),
+  z
+    .enum(["draft", "submitted", "in_review", "triaged", "approved", "rejected", "disputed"])
+    .optional(),
 );
 
 /**
@@ -166,6 +173,7 @@ export const rejectSubmissionBody = z.object({
 });
 
 export type CreateSubmissionDto = z.infer<typeof createSubmissionBody>;
+export type PatchTesterSubmissionEvidenceDto = z.infer<typeof patchTesterSubmissionEvidenceBody>;
 export type PatchSubmissionDto = z.infer<typeof patchSubmissionBody>;
 export type CommentDto = z.infer<typeof commentBody>;
 export type ApproveSubmissionDto = z.infer<typeof approveSubmissionBody>;

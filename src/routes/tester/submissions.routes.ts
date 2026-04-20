@@ -13,6 +13,7 @@ import {
   commentBody,
   createSubmissionBody,
   listTesterSubmissionsQuery,
+  patchTesterSubmissionEvidenceBody,
   submissionIdParams,
 } from "../../validation/index.js";
 
@@ -36,6 +37,15 @@ testerSubmissionsRouter.post(
   requireRole(UserRole.tester),
   validateBody(createSubmissionBody),
   asyncHandler(submissionController.postSubmission),
+);
+
+testerSubmissionsRouter.patch(
+  "/:id/evidence",
+  authenticate,
+  requireRole(UserRole.tester),
+  validateParams(submissionIdParams),
+  validateBody(patchTesterSubmissionEvidenceBody),
+  asyncHandler(submissionController.patchTesterSubmissionEvidence),
 );
 
 testerSubmissionsRouter.post(

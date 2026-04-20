@@ -15,6 +15,7 @@ import type { SeverityRewards } from "../types/campaign.types.js";
 import type {
   ApproveSubmissionInput,
   CreateSubmissionInput,
+  PatchTesterSubmissionEvidenceInput,
   RejectSubmissionInput,
 } from "../types/submission.types.js";
 import type { ListSubmissionsQueryDto } from "../validation/submission.schema.js";
@@ -90,6 +91,27 @@ function normalizeUrlList(urls: string[] | undefined): string[] {
   return out;
 }
 
+function assertEvidenceObjectKeysForSubmission(
+  campaignId: string,
+  submissionId: string,
+  keys: string[],
+): void {
+  const prefix = `campaigns/${campaignId}/submissions/${submissionId}/`;
+  for (const raw of keys) {
+    const k = raw.trim();
+    if (!k || k.includes("..") || k.startsWith("/")) {
+      throw new ValidationError("Invalid attachment object key");
+    }
+    if (!k.startsWith(prefix) || k.length <= prefix.length) {
+      throw new ValidationError("Attachment keys must belong to this submission upload path");
+    }
+    const rest = k.slice(prefix.length);
+    if (rest.includes("/")) {
+      throw new ValidationError("Invalid attachment object key");
+    }
+  }
+}
+
 /** Short title for list views; full text stays in `description`. */
 function feedbackTitleFromBody(feedback: string): string {
   const t = feedback.trim();
@@ -135,14 +157,34 @@ function mapSubmissionStatusUi(status: SubmissionStatus): string {
   return status === SubmissionStatus.in_review ? "in-review" : status;
 }
 
+/** Amount shown to testers as "earned" — net of platform fee (`payouts.testerAmount`). */
+function testerEarnedUsdc(
+  s: Pick<Submission, "status" | "payoutAmount"> & {
+    payouts?: { testerAmount: Prisma.Decimal | null }[];
+  },
+): number | undefined {
+  if (s.status !== SubmissionStatus.approved) return undefined;
+  const net = s.payouts?.[0]?.testerAmount;
+  if (net != null) return Number(dec(net));
+  if (s.payoutAmount != null) return Number(dec(s.payoutAmount)) * 0.85;
+  return undefined;
+}
+
+const submissionPayoutNetInclude = {
+  where: { status: PayoutStatus.completed },
+  orderBy: { paidAt: "desc" as const },
+  take: 1,
+  select: { testerAmount: true },
+};
+
 /** UI/dashboard-shaped submission (status uses `in-review`; adds campaign title + earned). */
 export function formatSubmissionForApi(
-  s: Submission & { campaign: Pick<Campaign, "id" | "title" | "clientId"> },
+  s: Submission & {
+    campaign: Pick<Campaign, "id" | "title" | "clientId">;
+    payouts?: { testerAmount: Prisma.Decimal | null }[];
+  },
 ) {
-  const earned =
-    s.status === SubmissionStatus.approved && s.payoutAmount
-      ? Number(dec(s.payoutAmount))
-      : undefined;
+  const earned = testerEarnedUsdc(s);
   return {
     ...submissionToApiShape(s),
     status: mapSubmissionStatusUi(s.status),
@@ -155,6 +197,7 @@ export function formatSubmissionForApi(
 
 const submissionDetailInclude = {
   campaign: true,
+  payouts: submissionPayoutNetInclude,
   tester: {
     select: {
       id: true,
@@ -277,6 +320,16 @@ function mapSubmissionLogsToActivities(
             timestamp: ts,
             actor,
           });
+        } else if (to === "triaged") {
+          out.push({
+            id: log.id,
+            type: "status-changed",
+            title: "Status changed to Triaged",
+            description: "Client commented or updated this submission",
+            timestamp: ts,
+            actor,
+            metadata: { oldStatus: from, newStatus: "triaged" },
+          });
         } else if (to === "disputed") {
           out.push({
             id: log.id,
@@ -346,10 +399,7 @@ function mapSubmissionLogsToActivities(
 
 /** Full submission payload for detail views (`GET /submissions/:id`, client campaign submission detail). */
 export function formatSubmissionDetailForApi(s: SubmissionDetailRow) {
-  const earned =
-    s.status === SubmissionStatus.approved && s.payoutAmount
-      ? Number(dec(s.payoutAmount))
-      : undefined;
+  const earned = testerEarnedUsdc(s);
 
   const comments = s.comments.map((c) => {
     const authorName = displayNameForUser(c.author);
@@ -394,6 +444,15 @@ const submissionListInclude = {
       client: { include: { clientProfile: true } },
     },
   },
+  payouts: submissionPayoutNetInclude,
+  tester: {
+    select: {
+      id: true,
+      displayName: true,
+      walletAddress: true,
+      avatarUrl: true,
+    },
+  },
 } as const;
 
 type SubmissionListRow = Prisma.SubmissionGetPayload<{
@@ -401,10 +460,7 @@ type SubmissionListRow = Prisma.SubmissionGetPayload<{
 }>;
 
 function submissionToListItem(s: SubmissionListRow) {
-  const earned =
-    s.status === SubmissionStatus.approved && s.payoutAmount
-      ? Number(dec(s.payoutAmount))
-      : undefined;
+  const earned = testerEarnedUsdc(s);
   return {
     id: s.id,
     title: s.title,
@@ -419,6 +475,11 @@ function submissionToListItem(s: SubmissionListRow) {
     submittedAt: s.submittedAt.toISOString(),
     lastUpdated: s.updatedAt.toISOString(),
     earned,
+    submittedBy: {
+      id: s.tester.id,
+      displayName: displayNameForUser(s.tester),
+      avatarUrl: s.tester.avatarUrl?.trim() ? s.tester.avatarUrl.trim() : null,
+    },
   };
 }
 
@@ -614,6 +675,51 @@ export async function createSubmission(
   };
 }
 
+/** Tester — persist evidence keys after presigned uploads to `campaigns/.../submissions/:id/…`. */
+export async function patchSubmissionEvidenceUrls(
+  testerId: string,
+  submissionId: string,
+  data: PatchTesterSubmissionEvidenceInput,
+) {
+  const sub = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { campaign: true },
+  });
+  if (!sub) throw new NotFoundError("Submission not found");
+  if (sub.testerId !== testerId) throw new ForbiddenError("Not your submission");
+  if (sub.status !== SubmissionStatus.submitted) {
+    throw new ValidationError("Evidence can only be attached while the submission is submitted");
+  }
+  if (sub.evidenceUrls.length > 0) {
+    throw new ValidationError("Evidence is already attached to this submission");
+  }
+
+  const seen = new Set<string>();
+  const attachmentUrls: string[] = [];
+  for (const u of data.attachmentUrls) {
+    const t = u.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    attachmentUrls.push(t);
+  }
+  if (attachmentUrls.length === 0) {
+    throw new ValidationError("attachmentUrls must not be empty");
+  }
+  assertEvidenceObjectKeysForSubmission(sub.campaignId, submissionId, attachmentUrls);
+
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { evidenceUrls: attachmentUrls },
+  });
+
+  const withCampaign = await prisma.submission.findUniqueOrThrow({
+    where: { id: submissionId },
+    include: { campaign: true },
+  });
+
+  return { submission: formatSubmissionForApi(withCampaign) };
+}
+
 export async function getSubmissionForUser(
   submissionId: string,
   viewer: ViewerContext,
@@ -696,10 +802,27 @@ export async function patchSubmissionSeverity(
       });
     }
 
+    const moveToTriaged = s.status === SubmissionStatus.in_review;
+
     await tx.submission.update({
       where: { id: submissionId },
-      data: { severity, allocatedAmount: newAlloc },
+      data: {
+        severity,
+        allocatedAmount: newAlloc,
+        ...(moveToTriaged ? { status: SubmissionStatus.triaged } : {}),
+      },
     });
+
+    if (moveToTriaged) {
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: clientId,
+          eventType: "status_changed",
+          metadata: { from: "in-review", to: "triaged" },
+        },
+      });
+    }
 
     await tx.submissionLog.create({
       data: {
@@ -713,7 +836,10 @@ export async function patchSubmissionSeverity(
 
   const full = await prisma.submission.findUniqueOrThrow({
     where: { id: submissionId },
-    include: { campaign: true },
+    include: {
+      campaign: true,
+      payouts: submissionPayoutNetInclude,
+    },
   });
   return formatSubmissionForApi(full);
 }
@@ -733,6 +859,9 @@ export async function addComment(
     throw new ForbiddenError("Only the tester or campaign client can comment");
   }
 
+  const isClient = authorId === s.campaign.clientId;
+  const moveToTriaged = isClient && s.status === SubmissionStatus.in_review;
+
   const comment = await prisma.$transaction(async (tx) => {
     const c = await tx.submissionComment.create({
       data: { submissionId, authorId, body, parentId },
@@ -745,6 +874,23 @@ export async function addComment(
         metadata: { comment_id: c.id },
       },
     });
+    const now = new Date();
+    await tx.submission.update({
+      where: { id: submissionId },
+      data: moveToTriaged
+        ? { status: SubmissionStatus.triaged, updatedAt: now }
+        : { updatedAt: now },
+    });
+    if (moveToTriaged) {
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: authorId,
+          eventType: "status_changed",
+          metadata: { from: "in-review", to: "triaged" },
+        },
+      });
+    }
     return c;
   });
 
@@ -764,7 +910,8 @@ export async function approveSubmission(
   if (s.campaign.clientId !== clientId) throw new ForbiddenError();
   if (
     s.status !== SubmissionStatus.submitted &&
-    s.status !== SubmissionStatus.in_review
+    s.status !== SubmissionStatus.in_review &&
+    s.status !== SubmissionStatus.triaged
   ) {
     throw new ValidationError("Submission cannot be approved in this status");
   }
@@ -849,7 +996,8 @@ export async function rejectSubmission(
   if (s.campaign.clientId !== clientId) throw new ForbiddenError();
   if (
     s.status !== SubmissionStatus.submitted &&
-    s.status !== SubmissionStatus.in_review
+    s.status !== SubmissionStatus.in_review &&
+    s.status !== SubmissionStatus.triaged
   ) {
     throw new ValidationError("Submission cannot be rejected in this status");
   }

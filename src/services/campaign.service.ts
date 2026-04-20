@@ -1,5 +1,6 @@
 import {
   CampaignStatus,
+  PayoutStatus,
   SubmissionStatus,
   UserRole,
 } from "../generated/prisma/enums.js";
@@ -57,7 +58,64 @@ async function uniqueTesterCountsByCampaignIds(
   return m;
 }
 
-function rowToUi(row: CampaignUiRow, uniqueTestersCount: number) {
+async function previewStatsForCampaignIds(campaignIds: string[]) {
+  if (campaignIds.length === 0) {
+    return {
+      submissionTotals: new Map<string, number>(),
+      paidByCampaign: new Map<string, number>(),
+      paidToTestersByCampaign: new Map<string, number>(),
+    };
+  }
+
+  const [submissionTotals, paidAgg, testerShareAgg] = await Promise.all([
+    prisma.submission.groupBy({
+      by: ["campaignId"],
+      where: { campaignId: { in: campaignIds } },
+      _count: { _all: true },
+    }),
+    prisma.submission.groupBy({
+      by: ["campaignId"],
+      where: {
+        campaignId: { in: campaignIds },
+        status: SubmissionStatus.approved,
+      },
+      _sum: { payoutAmount: true },
+    }),
+    prisma.payout.groupBy({
+      by: ["campaignId"],
+      where: {
+        campaignId: { in: campaignIds },
+        status: PayoutStatus.completed,
+      },
+      _sum: { testerAmount: true },
+    }),
+  ]);
+
+  return {
+    submissionTotals: new Map(
+      submissionTotals.map((r) => [r.campaignId, r._count._all]),
+    ),
+    paidByCampaign: new Map(
+      paidAgg.map((r) => [
+        r.campaignId,
+        r._sum.payoutAmount ? Number(dec(r._sum.payoutAmount)) : 0,
+      ]),
+    ),
+    paidToTestersByCampaign: new Map(
+      testerShareAgg.map((r) => [
+        r.campaignId,
+        r._sum.testerAmount ? Number(dec(r._sum.testerAmount)) : 0,
+      ]),
+    ),
+  };
+}
+
+function rowToUi(
+  row: CampaignUiRow,
+  uniqueTestersCount: number,
+  paidByCampaign: Map<string, number>,
+  paidToTestersByCampaign: Map<string, number>,
+) {
   const companyName = row.client?.clientProfile?.companyName ?? "Unknown";
   const logoUrl = row.client?.clientProfile?.logoUrl ?? null;
   return serializeCampaignUi(row, {
@@ -65,6 +123,8 @@ function rowToUi(row: CampaignUiRow, uniqueTestersCount: number) {
     logoUrl,
     submissionsCount: row._count.submissions,
     uniqueTestersCount,
+    totalPaid: paidByCampaign.get(row.id) ?? 0,
+    totalPaidToTesters: paidToTestersByCampaign.get(row.id) ?? 0,
   });
 }
 
@@ -83,8 +143,16 @@ async function loadCampaignUi(id: string) {
     include: campaignInclude,
   });
   if (!row) throw new NotFoundError("Campaign not found");
-  const counts = await uniqueTesterCountsByCampaignIds([id]);
-  return rowToUi(row, counts.get(id) ?? 0);
+  const [counts, paidMaps] = await Promise.all([
+    uniqueTesterCountsByCampaignIds([id]),
+    previewStatsForCampaignIds([id]),
+  ]);
+  return rowToUi(
+    row,
+    counts.get(id) ?? 0,
+    paidMaps.paidByCampaign,
+    paidMaps.paidToTestersByCampaign,
+  );
 }
 
 export async function createDraftCampaign(
@@ -114,43 +182,6 @@ export async function createDraftCampaign(
     },
   });
   return loadCampaignUi(campaign.id);
-}
-
-async function previewStatsForCampaignIds(campaignIds: string[]) {
-  if (campaignIds.length === 0) {
-    return {
-      submissionTotals: new Map<string, number>(),
-      paidByCampaign: new Map<string, number>(),
-    };
-  }
-
-  const [submissionTotals, paidAgg] = await Promise.all([
-    prisma.submission.groupBy({
-      by: ["campaignId"],
-      where: { campaignId: { in: campaignIds } },
-      _count: { _all: true },
-    }),
-    prisma.submission.groupBy({
-      by: ["campaignId"],
-      where: {
-        campaignId: { in: campaignIds },
-        status: SubmissionStatus.approved,
-      },
-      _sum: { payoutAmount: true },
-    }),
-  ]);
-
-  return {
-    submissionTotals: new Map(
-      submissionTotals.map((r) => [r.campaignId, r._count._all]),
-    ),
-    paidByCampaign: new Map(
-      paidAgg.map((r) => [
-        r.campaignId,
-        r._sum.payoutAmount ? Number(dec(r._sum.payoutAmount)) : 0,
-      ]),
-    ),
-  };
 }
 
 const publicListInclude = {
@@ -214,7 +245,7 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
   ]);
 
   const ids = rows.map((r) => r.id);
-  const [{ submissionTotals, paidByCampaign }, testerCounts] =
+  const [{ submissionTotals, paidByCampaign, paidToTestersByCampaign }, testerCounts] =
     await Promise.all([
       previewStatsForCampaignIds(ids),
       uniqueTesterCountsByCampaignIds(ids),
@@ -229,6 +260,7 @@ export async function listPublicCampaigns(query: ListPublicCampaignsQueryDto) {
       testers: testerCounts.get(row.id) ?? 0,
       submissions: submissionTotals.get(row.id) ?? 0,
       totalPaid: paidByCampaign.get(row.id) ?? 0,
+      totalPaidToTesters: paidToTestersByCampaign.get(row.id) ?? 0,
     });
   });
 
@@ -294,11 +326,19 @@ export async function getCampaignForViewer(
   });
   if (!c) throw new NotFoundError("Campaign not found");
 
-  const counts = await uniqueTesterCountsByCampaignIds([c.id]);
+  const [counts, paidMaps] = await Promise.all([
+    uniqueTesterCountsByCampaignIds([c.id]),
+    previewStatsForCampaignIds([c.id]),
+  ]);
   const uniqueTestersCount = counts.get(c.id) ?? 0;
 
   if (c.clientId === viewer.userId) {
-    return rowToUi(c, uniqueTestersCount);
+    return rowToUi(
+      c,
+      uniqueTestersCount,
+      paidMaps.paidByCampaign,
+      paidMaps.paidToTestersByCampaign,
+    );
   }
 
   if (viewer.role === UserRole.tester) {
@@ -308,7 +348,12 @@ export async function getCampaignForViewer(
       (c.status === CampaignStatus.active ||
         c.status === CampaignStatus.paused);
     if (!ok) throw new ForbiddenError("Campaign is not visible to testers");
-    return rowToUi(c, uniqueTestersCount);
+    return rowToUi(
+      c,
+      uniqueTestersCount,
+      paidMaps.paidByCampaign,
+      paidMaps.paidToTestersByCampaign,
+    );
   }
 
   throw new ForbiddenError("Cannot access this campaign");
@@ -325,8 +370,16 @@ export async function getCampaignPublicBrowse(campaignId: string) {
     include: campaignInclude,
   });
   if (!c) throw new NotFoundError("Campaign not found");
-  const counts = await uniqueTesterCountsByCampaignIds([c.id]);
-  return rowToUi(c, counts.get(c.id) ?? 0);
+  const [counts, paidMaps] = await Promise.all([
+    uniqueTesterCountsByCampaignIds([c.id]),
+    previewStatsForCampaignIds([c.id]),
+  ]);
+  return rowToUi(
+    c,
+    counts.get(c.id) ?? 0,
+    paidMaps.paidByCampaign,
+    paidMaps.paidToTestersByCampaign,
+  );
 }
 
 export async function patchCampaign(

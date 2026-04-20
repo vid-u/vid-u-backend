@@ -45,6 +45,17 @@ export async function postSubmission(req: Request, res: Response): Promise<void>
   sendSuccess(res, result, "Submission created", 201);
 }
 
+/** Tester — `PATCH /submissions/:id/evidence` after presigned uploads. */
+export async function patchTesterSubmissionEvidence(req: Request, res: Response): Promise<void> {
+  if (req.dbUser!.role !== UserRole.tester) {
+    res.status(403).json({ success: false, message: "Testers only" });
+    return;
+  }
+  const { id } = req.params as { id: string };
+  const result = await submissionService.patchSubmissionEvidenceUrls(req.dbUser!.id, id, req.body);
+  sendSuccess(res, result, "Evidence attached", 200);
+}
+
 /** Tester — `GET /submissions/:id`. */
 export async function getTesterSubmission(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
@@ -90,7 +101,7 @@ export async function postComment(req: Request, res: Response): Promise<void> {
     req.body.body,
     req.body.parentId,
   );
-  sendSuccess(res, comment, "Comment added", 201);
+  sendSuccess(res, { comment }, "Comment added", 201);
 }
 
 export async function postApprove(req: Request, res: Response): Promise<void> {
