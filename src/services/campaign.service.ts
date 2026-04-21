@@ -820,6 +820,20 @@ export async function topUpCampaign(
   if (!c.escrowPda) throw new ValidationError("Campaign has no escrow yet");
 
   const add = toDecimal(input.amountUsdc);
+  const txSig = input.txSignature.trim();
+
+  const existingLedger = await prisma.campaignTopUp.findUnique({
+    where: {
+      campaignId_txSignature: { campaignId, txSignature: txSig },
+    },
+  });
+  if (existingLedger) {
+    const campaign = await loadCampaignUi(campaignId);
+    return {
+      campaign,
+      chain: { pendingProgramConfirmation: false, topUpTx: txSig },
+    };
+  }
 
   if (!solanaRpcConfigured()) {
     throw new ValidationError("SOLANA_RPC_URL is required to verify fund_campaign transactions.");
@@ -832,7 +846,7 @@ export async function topUpCampaign(
     throw new ValidationError("Client must have a Solana wallet before topping up.");
   }
   try {
-    await verifyFundCampaignTx(input.txSignature, {
+    await verifyFundCampaignTx(txSig, {
       campaignUuid: campaignId,
       clientWalletBase58: clientUser.walletAddress.trim(),
       expectedAmountMicro: BigInt(usdcToRawAmount(add).toString()),
@@ -842,23 +856,51 @@ export async function topUpCampaign(
     throw new ValidationError(msg);
   }
 
-  await retryWithBackoff(() =>
-    prisma.campaign.update({
-      where: { id: campaignId },
-      data: {
-        budget: c.budget.plus(add),
-        budgetRemaining: c.budgetRemaining.plus(add),
-        availableBalance: c.availableBalance.plus(add),
-        status:
-          c.status === CampaignStatus.ended ? CampaignStatus.active : c.status,
-      },
-    }),
-  );
+  try {
+    await retryWithBackoff(() =>
+      prisma.$transaction(async (tx) => {
+        await tx.campaignTopUp.create({
+          data: {
+            campaignId,
+            txSignature: txSig,
+            amountUsdc: add,
+          },
+        });
+        const cur = await tx.campaign.findUniqueOrThrow({
+          where: { id: campaignId, clientId },
+        });
+        await tx.campaign.update({
+          where: { id: campaignId },
+          data: {
+            budget: cur.budget.plus(add),
+            budgetRemaining: cur.budgetRemaining.plus(add),
+            availableBalance: cur.availableBalance.plus(add),
+            status:
+              cur.status === CampaignStatus.ended
+                ? CampaignStatus.active
+                : cur.status,
+          },
+        });
+      }),
+    );
+  } catch (e) {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
+      const campaign = await loadCampaignUi(campaignId);
+      return {
+        campaign,
+        chain: { pendingProgramConfirmation: false, topUpTx: txSig },
+      };
+    }
+    throw e;
+  }
 
   const campaign = await loadCampaignUi(campaignId);
   return {
     campaign,
-    chain: { pendingProgramConfirmation: false, topUpTx: input.txSignature },
+    chain: { pendingProgramConfirmation: false, topUpTx: txSig },
   };
 }
 

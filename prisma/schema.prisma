@@ -168,6 +168,7 @@ model Campaign {
   submissions Submission[]
   payouts     Payout[]
   campaignFees CampaignFee[]
+  topUps      CampaignTopUp[]
 
   @@index([clientId])
   @@index([listed, status, escrowPda])
@@ -285,6 +286,21 @@ model CampaignFee {
 
   @@index([campaignId])
   @@map("campaign_fees")
+}
+
+/** One row per client top-up transaction — idempotent replays use the same `txSignature`. */
+model CampaignTopUp {
+  id          String   @id @default(uuid()) @db.Uuid
+  campaignId  String   @map("campaign_id") @db.Uuid
+  txSignature String   @map("tx_signature")
+  amountUsdc  Decimal  @map("amount_usdc") @db.Decimal(20, 8)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, txSignature])
+  @@index([campaignId])
+  @@map("campaign_top_ups")
 }
 
 model Waitlist {
