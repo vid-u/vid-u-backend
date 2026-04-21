@@ -219,6 +219,7 @@ const submissionDetailInclude = {
       displayName: true,
       walletAddress: true,
       role: true,
+      avatarUrl: true,
     },
   },
   comments: {
@@ -230,6 +231,8 @@ const submissionDetailInclude = {
           displayName: true,
           walletAddress: true,
           role: true,
+          avatarUrl: true,
+          clientProfile: { select: { logoUrl: true } },
         },
       },
     },
@@ -262,6 +265,19 @@ function displayNameForUser(u: {
   const w = u.walletAddress;
   if (w.length <= 12) return w;
   return `${w.slice(0, 4)}…${w.slice(-4)}`;
+}
+
+function authorAvatarUrlForApi(author: {
+  role: UserRole;
+  avatarUrl: string | null;
+  clientProfile: { logoUrl: string | null } | null;
+}): string | null {
+  if (author.role === UserRole.client) {
+    const logo = author.clientProfile?.logoUrl?.trim();
+    return logo || null;
+  }
+  const av = author.avatarUrl?.trim();
+  return av || null;
 }
 
 type SubmissionActivityApi = {
@@ -429,6 +445,7 @@ export function formatSubmissionDetailForApi(s: SubmissionDetailRow) {
       createdAt: c.createdAt.toISOString(),
       authorName,
       authorRole,
+      authorAvatarUrl: authorAvatarUrlForApi(c.author),
     };
   });
 
@@ -452,6 +469,7 @@ export function formatSubmissionDetailForApi(s: SubmissionDetailRow) {
       id: s.tester.id,
       displayName: displayNameForUser(s.tester),
       walletAddress: s.tester.walletAddress,
+      avatarUrl: s.tester.avatarUrl?.trim() ? s.tester.avatarUrl.trim() : null,
     },
     comments,
     activities,
