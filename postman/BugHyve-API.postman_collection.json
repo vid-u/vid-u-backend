@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "BugHyve API",
-    "description": "HTTP API for the BugHyve platform — bug-bounty campaigns, submissions, payouts, and account flows for clients and testers. Use this collection to call the backend that powers the BugHyve product.\n\n**Client → Campaigns:** includes **GET** / **POST** `/client/campaigns/:campaignId/sync-fund` for on-chain funding recovery when `POST .../fund` failed after a successful Solana transaction (see `docs/campaign-funding-sync.md`).\n\n**Response fields:** public campaign list rows include **`escrowPda`** and **`stats.totalPaidToTesters`**; submission list/detail may include **`payoutTxSignature`** and **`campaignEscrowPda`** where applicable.",
+    "description": "HTTP API for the BugHyve platform — bug-bounty campaigns, submissions, payouts, and account flows for clients and testers. Use this collection to call the backend that powers the BugHyve product.\n\n**Client → Campaigns:** includes **GET** / **POST** `/client/campaigns/:campaignId/sync-fund` for on-chain funding recovery when `POST .../fund` failed after a successful Solana transaction (see `docs/campaign-funding-sync.md`). **Budget → Refund unallocated:** **POST** `/client/campaigns/:id/refund` with **`refundTxSignature`** after the client wallet signs on-chain **`refund_campaign`** (withdraws **available** USDC only; campaign stays open). **Settings → End campaign:** **POST** `/client/campaigns/:id/close` with **`closeTxSignature`** after **`close_campaign`** (**allocated_balance** must be zero; sets **ended**).\n\n**Response fields:** public campaign list rows include **`escrowPda`** and **`stats.totalPaidToTesters`**; submission list/detail may include **`payoutTxSignature`**, **`submissionEscrowPda`**, and **`campaignEscrowPda`** where applicable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -1298,6 +1298,42 @@
               ]
             },
             {
+              "name": "POST /client/campaigns/:id/refund",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refundTxSignature\": \"5RefundTxSigExample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/refund",
+                "description": "Persists a client-signed **`refund_campaign`** transaction: withdraws **all** on-chain **`available_balance`** to the client USDC ATA; **does not** end the campaign. Body: **`refundTxSignature`** (required). Requires **`SOLANA_RPC_URL`** and matching **`BUGHYVE_PROGRAM_ID`** for verification."
+              },
+              "response": [
+                {
+                  "name": "200 Unallocated refunded",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Unallocated escrow refunded\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"status\": \"active\",\n      \"budget\": 800,\n      \"budgetRemaining\": 750,\n      \"availableBalance\": \"700\",\n      \"allocatedBalance\": \"50\",\n      \"escrowPda\": \"stubPda_...\"\n    },\n    \"chain\": {\n      \"pendingProgramConfirmation\": false,\n      \"refundTx\": \"5RefundTxSigExample\"\n    }\n  }\n}"
+                }
+              ]
+            },
+            {
               "name": "POST /client/campaigns/:id/close",
               "request": {
                 "method": "POST",
@@ -1320,7 +1356,8 @@
                     }
                   }
                 },
-                "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/close"
+                "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/close",
+                "description": "Persists a client-signed **`close_campaign`** transaction: requires **no** pending on-chain allocations (**`allocated_balance == 0`**); ends the campaign (**`ended`** in DB). Prefer **`refund_campaign`** + **POST …/refund** when you only want to withdraw **unallocated** USDC and keep the campaign open. Body: **`closeTxSignature`**."
               },
               "response": [
                 {

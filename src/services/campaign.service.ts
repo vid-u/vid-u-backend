@@ -15,7 +15,7 @@ import {
   BUGHYVE_STANDARD_REWARD_ELIGIBILITY,
 } from "../lib/bughyve-campaign-standards.js";
 import { deriveCampaignEscrowPdaBase58 } from "../lib/solana/campaignPda.js";
-import { usdcToRawAmount } from "../lib/solana/amounts.js";
+import { rawMicroToUsdcDecimal, usdcToRawAmount } from "../lib/solana/amounts.js";
 import {
   getCampaignAccountOnChain,
   pauseCampaignOnChain,
@@ -28,6 +28,7 @@ import {
   verifyCloseCampaignTx,
   verifyFundCampaignTx,
   verifyInitializeCampaignTx,
+  verifyRefundCampaignTx,
 } from "../lib/solana/verify-campaign-tx.js";
 import { dec, prisma } from "../lib/prisma.js";
 import { buildPaginationMeta, pageToOffset } from "../utils/api-response.js";
@@ -901,6 +902,90 @@ export async function topUpCampaign(
   return {
     campaign,
     chain: { pendingProgramConfirmation: false, topUpTx: txSig },
+  };
+}
+
+/**
+ * Records a client-signed `refund_campaign` tx: withdraws unallocated vault USDC only; campaign
+ * stays active (unlike `close_campaign`).
+ */
+export async function refundCampaignUnallocated(
+  campaignId: string,
+  clientId: string,
+  refundTxSignature: string,
+) {
+  await reconcileCampaignAllocatedFromSubmissions(campaignId);
+  const c = await prisma.campaign.findFirst({
+    where: { id: campaignId, clientId },
+  });
+  if (!c) throw new NotFoundError("Campaign not found");
+  if (!c.escrowPda?.trim()) {
+    throw new ValidationError("Campaign has no on-chain escrow.");
+  }
+  if (c.status === CampaignStatus.ended) {
+    throw new ValidationError("Campaign has already ended.");
+  }
+  if (c.availableBalance.lte(0)) {
+    throw new ValidationError("No unallocated balance to refund.");
+  }
+
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError(
+      "SOLANA_RPC_URL is required to verify refund_campaign transactions.",
+    );
+  }
+  const clientUser = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { walletAddress: true },
+  });
+  if (!clientUser?.walletAddress?.trim()) {
+    throw new ValidationError("Client must have a Solana wallet.");
+  }
+  try {
+    await verifyRefundCampaignTx(refundTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: clientUser.walletAddress.trim(),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "On-chain refund verification failed";
+    throw new ValidationError(msg);
+  }
+
+  const onChain = await getCampaignAccountOnChain(campaignId);
+  if (!onChain) {
+    throw new ValidationError("Campaign escrow account not found on-chain.");
+  }
+  const newAvail = rawMicroToUsdcDecimal(onChain.availableBalance);
+  const newAlloc = rawMicroToUsdcDecimal(onChain.allocatedBalance);
+
+  const cur = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { availableBalance: true, budgetRemaining: true, budget: true },
+  });
+  if (!cur) throw new NotFoundError("Campaign not found");
+  const refunded = cur.availableBalance.minus(newAvail);
+  if (refunded.lte(0)) {
+    throw new ValidationError(
+      "Nothing was refunded on-chain, or the database was already in sync. Refresh the page.",
+    );
+  }
+
+  await retryWithBackoff(() =>
+    prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        availableBalance: newAvail,
+        allocatedBalance: newAlloc,
+        budgetRemaining: cur.budgetRemaining.minus(refunded),
+        budget: cur.budget.minus(refunded),
+      },
+    }),
+  );
+
+  const campaign = await loadCampaignUi(campaignId);
+  return {
+    campaign,
+    chain: { pendingProgramConfirmation: false, refundTx: refundTxSignature },
   };
 }
 

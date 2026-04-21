@@ -11,6 +11,36 @@ import type { Prisma } from "../../generated/prisma/client.js";
 
 const CHAIN_ACTIVE = 1;
 
+/** Read `SubmissionAllocation` after allocate / reallocate (pending status = 0). */
+export async function fetchSubmissionAllocationOnChain(input: {
+  campaignUuid: string;
+  submissionUuid: string;
+}): Promise<{ allocatedAmountRaw: BN; status: number } | null> {
+  const connection = getSolanaConnection();
+  const programPk = getProgramId();
+  const idl = getAnchorIdl();
+  const wallet = new Wallet(Keypair.generate());
+  const provider = new AnchorProvider(connection, wallet, {
+    commitment: "confirmed",
+    preflightCommitment: "confirmed",
+  });
+  const program = new Program(idl, provider);
+  const campaignPk = campaignPda(programPk, input.campaignUuid);
+  const subPk = submissionPda(programPk, campaignPk, input.submissionUuid);
+
+  const accountNs = program.account as unknown as {
+    submissionAllocation: {
+      fetch: (pk: PublicKey) => Promise<{ allocatedAmount: { toString(): string }; status: number }>;
+    };
+  };
+  const raw = await accountNs.submissionAllocation.fetch(subPk).catch(() => null);
+  if (!raw) return null;
+  return {
+    allocatedAmountRaw: new BN(raw.allocatedAmount.toString(), 10),
+    status: raw.status,
+  };
+}
+
 export async function allocateSubmissionOnChain(input: {
   campaignUuid: string;
   submissionUuid: string;
@@ -52,7 +82,7 @@ export async function allocateSubmissionOnChain(input: {
     throw new Error("Insufficient on-chain available balance for this allocation");
   }
 
-  return retryWithBackoff(() =>
+  const sig = await retryWithBackoff(() =>
     program.methods
       .allocateSubmission(submissionIdArr, testerPk, amount, expiresSec)
       .accounts({
@@ -64,6 +94,17 @@ export async function allocateSubmissionOnChain(input: {
       })
       .rpc(),
   );
+
+  const post = await fetchSubmissionAllocationOnChain({
+    campaignUuid: input.campaignUuid,
+    submissionUuid: input.submissionUuid,
+  });
+  if (!post || !post.allocatedAmountRaw.eq(amount) || post.status !== 0) {
+    throw new Error(
+      "allocate_submission confirmed but on-chain submission lock does not match the expected amount",
+    );
+  }
+  return sig;
 }
 
 /** Adjust locked USDC for a pending submission (e.g. client changed severity / payout band). */
@@ -133,7 +174,7 @@ export async function reallocateSubmissionOnChain(input: {
     }
   }
 
-  return retryWithBackoff(() =>
+  const sig = await retryWithBackoff(() =>
     program.methods
       .reallocateSubmission(newRaw)
       .accounts({
@@ -144,6 +185,17 @@ export async function reallocateSubmissionOnChain(input: {
       })
       .rpc(),
   );
+
+  const post = await fetchSubmissionAllocationOnChain({
+    campaignUuid: input.campaignUuid,
+    submissionUuid: input.submissionUuid,
+  });
+  if (!post || !post.allocatedAmountRaw.eq(newRaw) || post.status !== 0) {
+    throw new Error(
+      "reallocate_submission confirmed but on-chain submission lock does not match the expected amount",
+    );
+  }
+  return sig;
 }
 
 export async function rejectSubmissionOnChain(input: {

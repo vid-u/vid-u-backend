@@ -69,7 +69,7 @@ Never commit secrets to git.
 
 ### Solana (BugHyve escrow)
 
-When the API signs on-chain escrow instructions (`allocate_submission`, `pause_campaign` / `resume_campaign` — triggered when **`PATCH /client/campaigns/:id/update`** changes **`status`** between **active** and **paused** for a funded campaign, plus optional backend-signed **reject**, etc.), or **verifies** client-signed transactions (fund, approve, reject, **`GET`/`POST` `/client/campaigns/:id/sync-fund`**), set:
+When the API signs on-chain escrow instructions (`allocate_submission`, `pause_campaign` / `resume_campaign` — triggered when **`PATCH /client/campaigns/:id/update`** changes **`status`** between **active** and **paused** for a funded campaign, plus optional backend-signed **reject**, etc.), or **verifies** client-signed transactions (fund, approve, reject, **`refund_campaign`** via **`POST /client/campaigns/:id/refund`**, **`close_campaign`** via **`POST /client/campaigns/:id/close`**, **`GET`/`POST` `/client/campaigns/:id/sync-fund`**), set:
 
 | Variable | Purpose |
 | -------- | ------- |
@@ -152,6 +152,6 @@ The app reads `FRONTEND_URL` (comma-separated). Add every production and preview
 - [ ] CORS origins correct for frontend domain(s)
 - [ ] Optional R2 variables set and tested
 - [ ] If API signs Solana txs: `SOLANA_RPC_URL`, `BUGHYVE_PROGRAM_ID`, and `BACKEND_AUTHORITY_SECRET` match [escrow deployment](../../bughyve-escrow-solana/docs/deployment.md) and on-chain `initialize_config`
-- [ ] If clients use fund / sync-fund / approve flows: `SOLANA_RPC_URL` (and `SOLANA_WS_URL` if needed) point at the same cluster as the app; see [campaign-funding-sync.md](./campaign-funding-sync.md)
+- [ ] If clients use fund / sync-fund / approve / **refund** / **close** flows: `SOLANA_RPC_URL` (and `SOLANA_WS_URL` if needed) point at the same cluster as the app; see [campaign-funding-sync.md](./campaign-funding-sync.md)
 
 See also [Supabase setup](./supabase-setup.md) and [Cloudflare R2](./cloudflare-r2.md) for full env var details.

@@ -12,9 +12,12 @@ import { Prisma } from "../generated/prisma/client.js";
 import { solanaBackendConfigured, solanaRpcConfigured } from "../lib/solana/config.js";
 import {
   allocateSubmissionOnChain,
+  fetchSubmissionAllocationOnChain,
   reallocateSubmissionOnChain,
   rejectSubmissionOnChain,
 } from "../lib/solana/escrow.js";
+import { usdcToRawAmount } from "../lib/solana/amounts.js";
+import { submissionEscrowPdaBase58 } from "../lib/solana/pdas.js";
 import { retryWithBackoff } from "../lib/solana/retry.js";
 import { verifyAllocateSubmissionTx } from "../lib/solana/verify-campaign-tx.js";
 import {
@@ -41,6 +44,26 @@ import {
 
 function toDecimal(v: number | string): Prisma.Decimal {
   return new Prisma.Decimal(typeof v === "number" ? String(v) : v);
+}
+
+/** `submission_logs.metadata` — `txSignatures` groups on-chain txs for escrow actions. */
+function submissionLogMetadata(
+  fields: Record<string, unknown>,
+  txSignatures?: Partial<{
+    allocate: string;
+    reallocate: string;
+    approve: string;
+    reject: string;
+  }>,
+): Prisma.InputJsonValue {
+  const sig: Record<string, string> = {};
+  if (txSignatures?.allocate?.trim()) sig.allocate = txSignatures.allocate.trim();
+  if (txSignatures?.reallocate?.trim()) sig.reallocate = txSignatures.reallocate.trim();
+  if (txSignatures?.approve?.trim()) sig.approve = txSignatures.approve.trim();
+  if (txSignatures?.reject?.trim()) sig.reject = txSignatures.reject.trim();
+  const out: Record<string, unknown> = { ...fields };
+  if (Object.keys(sig).length) out.txSignatures = sig;
+  return out as Prisma.InputJsonValue;
 }
 
 function midpointForSeverity(
@@ -156,6 +179,7 @@ function submissionToApiShape(s: Submission) {
     rejectionText: s.rejectionText,
     allocatedAmount: dec(s.allocatedAmount),
     payoutAmount: dec(s.payoutAmount),
+    submissionEscrowPda: s.submissionEscrowPda ?? null,
     submittedAt: s.submittedAt.toISOString(),
     reviewedAt: s.reviewedAt?.toISOString() ?? null,
     expiresAt: s.expiresAt?.toISOString() ?? null,
@@ -290,6 +314,18 @@ type SubmissionActivityApi = {
   metadata?: Record<string, unknown>;
 };
 
+/** Merge DB `log.metadata` (e.g. `txSignatures`) with UI-friendly fields. */
+function mergeActivityMetadata(
+  log: { metadata: unknown },
+  extras: Record<string, unknown>,
+): { metadata: Record<string, unknown> } {
+  const base =
+    log.metadata !== null && typeof log.metadata === "object" && !Array.isArray(log.metadata)
+      ? { ...(log.metadata as Record<string, unknown>) }
+      : {};
+  return { metadata: { ...base, ...extras } };
+}
+
 function mapSubmissionLogsToActivities(
   logs: SubmissionDetailRow["logs"],
   submissionTitle: string,
@@ -317,6 +353,7 @@ function mapSubmissionLogsToActivities(
           description: `Bug report "${submissionTitle}" was submitted`,
           timestamp: ts,
           actor,
+          ...mergeActivityMetadata(log, {}),
         });
         break;
       case "status_changed": {
@@ -331,7 +368,7 @@ function mapSubmissionLogsToActivities(
             description: "Client opened this submission for review",
             timestamp: ts,
             actor,
-            metadata: { oldStatus: from, newStatus: "in-review" },
+            ...mergeActivityMetadata(log, { oldStatus: from, newStatus: "in-review" }),
           });
         } else if (to === "approved") {
           out.push({
@@ -341,6 +378,7 @@ function mapSubmissionLogsToActivities(
             description: "The submission was approved",
             timestamp: ts,
             actor,
+            ...mergeActivityMetadata(log, {}),
           });
         } else if (to === "rejected") {
           out.push({
@@ -350,6 +388,7 @@ function mapSubmissionLogsToActivities(
             description: "The submission was rejected",
             timestamp: ts,
             actor,
+            ...mergeActivityMetadata(log, {}),
           });
         } else if (to === "triaged") {
           out.push({
@@ -359,7 +398,7 @@ function mapSubmissionLogsToActivities(
             description: "Client commented or updated this submission",
             timestamp: ts,
             actor,
-            metadata: { oldStatus: from, newStatus: "triaged" },
+            ...mergeActivityMetadata(log, { oldStatus: from, newStatus: "triaged" }),
           });
         } else if (to === "disputed") {
           out.push({
@@ -369,7 +408,7 @@ function mapSubmissionLogsToActivities(
             description: "The submission was disputed",
             timestamp: ts,
             actor,
-            metadata: { oldStatus: from, newStatus: "disputed" },
+            ...mergeActivityMetadata(log, { oldStatus: from, newStatus: "disputed" }),
           });
         } else {
           out.push({
@@ -379,7 +418,7 @@ function mapSubmissionLogsToActivities(
             description: `Status changed from ${from} to ${to}`,
             timestamp: ts,
             actor,
-            metadata: { oldStatus: from, newStatus: to },
+            ...mergeActivityMetadata(log, { oldStatus: from, newStatus: to }),
           });
         }
         break;
@@ -392,6 +431,7 @@ function mapSubmissionLogsToActivities(
           description: "Severity was changed for this submission",
           timestamp: ts,
           actor,
+          ...mergeActivityMetadata(log, {}),
         });
         break;
       case "comment_added":
@@ -402,6 +442,7 @@ function mapSubmissionLogsToActivities(
           description: "A new comment was posted",
           timestamp: ts,
           actor,
+          ...mergeActivityMetadata(log, {}),
         });
         break;
       case "payout_initiated":
@@ -412,6 +453,7 @@ function mapSubmissionLogsToActivities(
           description: "Payout processing started",
           timestamp: ts,
           actor,
+          ...mergeActivityMetadata(log, {}),
         });
         break;
       default:
@@ -422,6 +464,7 @@ function mapSubmissionLogsToActivities(
           description: "Activity recorded",
           timestamp: ts,
           actor,
+          ...mergeActivityMetadata(log, {}),
         });
     }
   }
@@ -658,6 +701,21 @@ export async function createSubmission(
       throw new ValidationError(msg);
     }
 
+    const chainLock = await fetchSubmissionAllocationOnChain({
+      campaignUuid: data.campaignId,
+      submissionUuid: chainRecovery.submissionId,
+    });
+    const expectedRaw = usdcToRawAmount(allocation);
+    if (
+      !chainLock ||
+      !chainLock.allocatedAmountRaw.eq(expectedRaw) ||
+      chainLock.status !== 0
+    ) {
+      throw new ValidationError(
+        "On-chain allocation for this submission does not match the expected amount; refresh and retry.",
+      );
+    }
+
     const existing = await prisma.submission.findUnique({
       where: { id: chainRecovery.submissionId },
       include: { campaign: true },
@@ -666,8 +724,24 @@ export async function createSubmission(
       if (existing.testerId !== testerId || existing.campaignId !== data.campaignId) {
         throw new ForbiddenError();
       }
+      if (!existing.submissionEscrowPda) {
+        await prisma.submission.update({
+          where: { id: existing.id },
+          data: {
+            submissionEscrowPda: submissionEscrowPdaBase58(
+              data.campaignId,
+              chainRecovery.submissionId,
+            ),
+          },
+        });
+      }
       return {
-        submission: formatSubmissionForApi(existing),
+        submission: formatSubmissionForApi(
+          await prisma.submission.findUniqueOrThrow({
+            where: { id: existing.id },
+            include: { campaign: true },
+          }),
+        ),
         chain: {
           pendingProgramConfirmation: false,
           allocateTx: chainRecovery.allocateTxSignature,
@@ -693,6 +767,8 @@ export async function createSubmission(
       throw new ValidationError(msg);
     }
   }
+
+  const submissionEscrowPda = submissionEscrowPdaBase58(data.campaignId, submissionId);
 
   const attachmentUrls = mergedAttachmentUrls(data);
   const resourceLinks = normalizeUrlList(data.links);
@@ -729,6 +805,7 @@ export async function createSubmission(
                   severity: SubmissionSeverity.mild,
                   status: SubmissionStatus.submitted,
                   allocatedAmount: allocation,
+                  submissionEscrowPda,
                   evidenceUrls: attachmentUrls,
                   resourceLinks,
                   expiresAt,
@@ -757,6 +834,7 @@ export async function createSubmission(
                   severity: data.severity,
                   status: SubmissionStatus.submitted,
                   allocatedAmount: allocation,
+                  submissionEscrowPda,
                   evidenceUrls: attachmentUrls,
                   resourceLinks,
                   expiresAt,
@@ -768,7 +846,7 @@ export async function createSubmission(
             submissionId: sub.id,
             actorId: testerId,
             eventType: "submission_created",
-            metadata: { allocateTx },
+            metadata: submissionLogMetadata({}, { allocate: allocateTx }),
           },
         });
 
@@ -949,6 +1027,12 @@ export async function patchSubmissionSeverity(
   const newAlloc = midpointForSeverity(severity, s.campaign.severityRewards);
   const delta = newAlloc.minus(s.allocatedAmount);
 
+  if (!delta.equals(0) && s.campaign.escrowPda?.trim() && !solanaBackendConfigured()) {
+    throw new ValidationError(
+      "This campaign uses on-chain escrow; configure the Solana backend (RPC + authority key) to change severity and keep the vault in sync.",
+    );
+  }
+
   let reallocateTx: string | undefined;
   if (solanaBackendConfigured() && !delta.equals(0)) {
     reallocateTx = await reallocateSubmissionOnChain({
@@ -997,10 +1081,14 @@ export async function patchSubmissionSeverity(
         submissionId,
         actorId: clientId,
         eventType: "severity_changed",
-        metadata: {
-          severity,
-          ...(reallocateTx ? { reallocateTx } : {}),
-        },
+        metadata: submissionLogMetadata(
+          {
+            severity,
+            previousAllocated: s.allocatedAmount.toString(),
+            newAllocated: newAlloc.toString(),
+          },
+          reallocateTx ? { reallocate: reallocateTx } : {},
+        ),
       },
     });
   });
@@ -1136,6 +1224,7 @@ export async function approveSubmission(
           reviewedAt: new Date(),
           payoutAmount: gross,
           severity: input?.severity ?? s.severity,
+          allocatedAmount: new Prisma.Decimal(0),
         },
       });
 
@@ -1167,7 +1256,7 @@ export async function approveSubmission(
           submissionId,
           actorId: clientId,
           eventType: "payout_initiated",
-          metadata: { tx: txSig, gross: gross.toString() },
+          metadata: submissionLogMetadata({ gross: gross.toString() }, { approve: txSig }),
         },
       });
     }),
@@ -1242,6 +1331,7 @@ export async function rejectSubmission(
           status: SubmissionStatus.rejected,
           reviewedAt: new Date(),
           rejectionText: input.rejectionText,
+          allocatedAmount: new Prisma.Decimal(0),
         },
       });
 
@@ -1258,7 +1348,10 @@ export async function rejectSubmission(
           submissionId,
           actorId: clientId,
           eventType: "status_changed",
-          metadata: { from: s.status, to: "rejected", rejectTx: txSig },
+          metadata: submissionLogMetadata(
+            { from: s.status, to: "rejected" },
+            { reject: txSig },
+          ),
         },
       });
     }),

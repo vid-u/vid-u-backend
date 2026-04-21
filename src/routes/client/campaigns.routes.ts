@@ -9,6 +9,7 @@ import {
   campaignIdParams,
   clientCampaignIdParams,
   closeCampaignBody,
+  refundCampaignBody,
   createCampaignBody,
   fundCampaignBody,
   listActivitiesQuery,
@@ -86,6 +87,15 @@ clientCampaignRouter.post(
   validateParams(campaignIdParams),
   validateBody(closeCampaignBody),
   asyncHandler(campaignController.postCloseCampaign),
+);
+
+clientCampaignRouter.post(
+  "/:id/refund",
+  authenticate,
+  requireRole(UserRole.client),
+  validateParams(campaignIdParams),
+  validateBody(refundCampaignBody),
+  asyncHandler(campaignController.postRefundCampaign),
 );
 
 clientCampaignRouter.get(

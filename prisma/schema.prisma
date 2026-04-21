@@ -205,6 +205,8 @@ model Submission {
   reviewedAt         DateTime?           @map("reviewed_at")
   expiresAt          DateTime?           @map("expires_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
+  /** On-chain `SubmissionAllocation` PDA base58 (`["submission", campaign_pda, submission_id_bytes]`). */
+  submissionEscrowPda String?            @map("submission_escrow_pda")
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
   tester   User     @relation("TesterSubmissions", fields: [testerId], references: [id])
@@ -216,6 +218,7 @@ model Submission {
   @@index([campaignId])
   @@index([testerId])
   @@index([status])
+  @@index([submissionEscrowPda])
   @@map("submissions")
 }
 

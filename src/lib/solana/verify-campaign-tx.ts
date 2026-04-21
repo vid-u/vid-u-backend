@@ -6,6 +6,7 @@ import { findIxMatching, readU64Le } from "./tx-parse.js";
 const INIT_DISC = Uint8Array.from([169, 88, 7, 6, 9, 165, 65, 132]);
 const FUND_DISC = Uint8Array.from([109, 57, 56, 239, 99, 111, 221, 121]);
 const CLOSE_DISC = Uint8Array.from([65, 49, 110, 7, 63, 238, 206, 77]);
+const REFUND_DISC = Uint8Array.from([232, 19, 109, 7, 229, 33, 157, 226]);
 const ALLOCATE_DISC = Uint8Array.from([124, 190, 60, 38, 198, 146, 130, 67]);
 
 async function loadConfirmedTx(signature: string) {
@@ -82,6 +83,23 @@ export async function verifyCloseCampaignTx(
     return Boolean(keys.get(ai[2]!)?.equals(expectedCamp));
   });
   if (!ok) throw new Error("Not a valid close_campaign for this campaign");
+}
+
+/** `refund_campaign` — same account order as `close_campaign` (client at 0, campaign at 2). */
+export async function verifyRefundCampaignTx(
+  signature: string,
+  input: { campaignUuid: string; clientWalletBase58: string },
+): Promise<void> {
+  const programPk = getProgramId();
+  const expectedCamp = campaignPda(programPk, input.campaignUuid);
+  const clientPk = new PublicKey(input.clientWalletBase58);
+  const tx = await loadConfirmedTx(signature);
+  const ok = findIxMatching(tx, programPk, REFUND_DISC, (keys, ai) => {
+    if (ai.length < 3) return false;
+    if (!keys.get(ai[0]!)?.equals(clientPk)) return false;
+    return Boolean(keys.get(ai[2]!)?.equals(expectedCamp));
+  });
+  if (!ok) throw new Error("Not a valid refund_campaign for this campaign");
 }
 
 /** Confirms `allocate_submission` locked this campaign + submission PDAs (recovery path). */

@@ -10,3 +10,8 @@ export function usdcToRawAmount(usdc: Prisma.Decimal | number | string): BN {
   const s = dec.times(1_000_000).toFixed(0, Prisma.Decimal.ROUND_HALF_UP);
   return new BN(s, 10);
 }
+
+/** On-chain USDC raw (6 decimals) → Prisma.Decimal human USDC. */
+export function rawMicroToUsdcDecimal(raw: BN): Prisma.Decimal {
+  return new Prisma.Decimal(raw.toString(10)).dividedBy(1_000_000);
+}

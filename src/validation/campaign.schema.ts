@@ -219,6 +219,10 @@ export const closeCampaignBody = z.object({
   closeTxSignature: z.string().min(1),
 });
 
+export const refundCampaignBody = z.object({
+  refundTxSignature: z.string().min(1),
+});
+
 export const listCampaignsQuery = z.object({
   mine: z.enum(["true", "false"]).optional(),
 });
@@ -236,3 +240,4 @@ export type PatchCampaignDto = z.infer<typeof patchCampaignBody>;
 export type FundCampaignDto = z.infer<typeof fundCampaignBody>;
 export type TopUpCampaignDto = z.infer<typeof topUpCampaignBody>;
 export type CloseCampaignDto = z.infer<typeof closeCampaignBody>;
+export type RefundCampaignDto = z.infer<typeof refundCampaignBody>;

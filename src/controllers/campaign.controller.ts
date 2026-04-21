@@ -5,6 +5,7 @@ import type {
   CloseCampaignDto,
   ListClientCampaignsQueryDto,
   ListPublicCampaignsQueryDto,
+  RefundCampaignDto,
 } from "../validation/campaign.schema.js";
 import type { ListActivitiesQueryDto } from "../validation/activities.schema.js";
 import { sendSuccess } from "../utils/api-response.js";
@@ -112,4 +113,15 @@ export async function postCloseCampaign(req: Request, res: Response): Promise<vo
   const body = req.body as CloseCampaignDto;
   const result = await campaignService.closeCampaign(id, req.dbUser!.id, body.closeTxSignature);
   sendSuccess(res, result, "Campaign ended");
+}
+
+export async function postRefundCampaign(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  const body = req.body as RefundCampaignDto;
+  const result = await campaignService.refundCampaignUnallocated(
+    id,
+    req.dbUser!.id,
+    body.refundTxSignature,
+  );
+  sendSuccess(res, result, "Unallocated escrow refunded");
 }
