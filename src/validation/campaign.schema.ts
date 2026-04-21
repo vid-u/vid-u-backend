@@ -216,7 +216,7 @@ export const topUpCampaignBody = z.object({
 });
 
 export const closeCampaignBody = z.object({
-  closeTxSignature: z.string().min(1).optional(),
+  closeTxSignature: z.string().min(1),
 });
 
 export const listCampaignsQuery = z.object({

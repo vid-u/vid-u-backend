@@ -54,6 +54,22 @@ clientCampaignRouter.post(
   asyncHandler(campaignController.postFundCampaign),
 );
 
+clientCampaignRouter.get(
+  "/:id/sync-fund",
+  authenticate,
+  requireRole(UserRole.client),
+  validateParams(campaignIdParams),
+  asyncHandler(campaignController.getCampaignFundingSync),
+);
+
+clientCampaignRouter.post(
+  "/:id/sync-fund",
+  authenticate,
+  requireRole(UserRole.client),
+  validateParams(campaignIdParams),
+  asyncHandler(campaignController.postCampaignFundingSync),
+);
+
 clientCampaignRouter.post(
   "/:id/top-up",
   authenticate,

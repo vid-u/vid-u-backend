@@ -60,8 +60,27 @@ Copy from [`.env.example`](../.env.example), then set these in Railway Variables
 | `R2_SECRET_ACCESS_KEY`      | Optional          | Needed for R2 uploads                   |
 | `R2_BUCKET`                 | Optional          | Needed for R2 uploads                   |
 | `R2_PUBLIC_BASE_URL`        | Optional          | Public avatar/logo URL base             |
+| `SOLANA_RPC_URL`            | If API signs chain or verifies client txs | Same cluster as deployed escrow program |
+| `SOLANA_WS_URL`             | Optional           | WebSocket JSON-RPC when it does not match the usual `http`→`ws` / `https`→`wss` twin of `SOLANA_RPC_URL` |
+| `BUGHYVE_PROGRAM_ID`        | If API signs chain | Deployed program pubkey (see escrow guide) |
+| `BACKEND_AUTHORITY_SECRET`  | If API signs chain | Matches `initialize_config` `backend_authority` |
 
 Never commit secrets to git.
+
+### Solana (BugHyve escrow)
+
+When the API signs on-chain escrow instructions (`allocate_submission`, `pause_campaign` / `resume_campaign` — triggered when **`PATCH /client/campaigns/:id/update`** changes **`status`** between **active** and **paused** for a funded campaign, plus optional backend-signed **reject**, etc.), or **verifies** client-signed transactions (fund, approve, reject, **`GET`/`POST` `/client/campaigns/:id/sync-fund`**), set:
+
+| Variable | Purpose |
+| -------- | ------- |
+| `SOLANA_RPC_URL` | JSON-RPC for submissions, confirmations, and reading transactions (same cluster as deployed program). |
+| `SOLANA_WS_URL` | Optional. WebSocket endpoint for RPC subscriptions if your provider’s WSS URL is not the default twin of `SOLANA_RPC_URL`. |
+| `BUGHYVE_PROGRAM_ID` | Deployed program address — **public id only**, matches `declare_id!` on-chain. |
+| `BACKEND_AUTHORITY_SECRET` | Secret key for the pubkey you passed as `backend_authority` in `initialize_config` (JSON array string or path to a keypair file — see `src/lib/env.ts`). Must match on-chain config or transactions will fail. |
+
+On-chain recovery without re-signing: [campaign-funding-sync.md](./campaign-funding-sync.md).
+
+**Keypairs vs env:** The program id, upgrade authority, and backend authority are **different roles**. You do not need three browser wallets; you typically use one deploy/upgrade wallet for Anchor CLI and a **separate** backend-only keypair for `BACKEND_AUTHORITY_SECRET`. Full walkthrough: **[BugHyve escrow deployment guide](../../bughyve-escrow-solana/docs/deployment.md)** (“Roles: program id, upgrade authority, backend authority”). Signing model: [frontend-integration.md](../../bughyve-escrow-solana/docs/frontend-integration.md).
 
 ## 4. Production migrations
 
@@ -132,5 +151,7 @@ The app reads `FRONTEND_URL` (comma-separated). Add every production and preview
 - [ ] Railway cron schedule active
 - [ ] CORS origins correct for frontend domain(s)
 - [ ] Optional R2 variables set and tested
+- [ ] If API signs Solana txs: `SOLANA_RPC_URL`, `BUGHYVE_PROGRAM_ID`, and `BACKEND_AUTHORITY_SECRET` match [escrow deployment](../../bughyve-escrow-solana/docs/deployment.md) and on-chain `initialize_config`
+- [ ] If clients use fund / sync-fund / approve flows: `SOLANA_RPC_URL` (and `SOLANA_WS_URL` if needed) point at the same cluster as the app; see [campaign-funding-sync.md](./campaign-funding-sync.md)
 
 See also [Supabase setup](./supabase-setup.md) and [Cloudflare R2](./cloudflare-r2.md) for full env var details.

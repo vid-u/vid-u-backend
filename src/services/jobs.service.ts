@@ -1,11 +1,10 @@
 import { SubmissionStatus } from "../generated/prisma/enums.js";
-import { stubTxSignature } from "../lib/stubChain.js";
 import { prisma } from "../lib/prisma.js";
 
+/** Marks expired open submissions as disputed (no on-chain release instruction — bookkeeping only). */
 export async function runCheckExpired(): Promise<{
   processed: number;
   submissionIds: string[];
-  txSignatures: string[];
 }> {
   const now = new Date();
   const stuck = await prisma.submission.findMany({
@@ -21,12 +20,9 @@ export async function runCheckExpired(): Promise<{
     },
   });
 
-  const txSignatures: string[] = [];
   const ids: string[] = [];
 
   for (const s of stuck) {
-    const tx = stubTxSignature("release_expired");
-    txSignatures.push(tx);
     ids.push(s.id);
 
     await prisma.$transaction(async (trx) => {
@@ -39,11 +35,11 @@ export async function runCheckExpired(): Promise<{
           submissionId: s.id,
           actorId: null,
           eventType: "expiry_disputed",
-          metadata: { pendingReleaseExpiredTx: tx },
+          metadata: { source: "off_chain_expiry_cron" },
         },
       });
     });
   }
 
-  return { processed: stuck.length, submissionIds: ids, txSignatures };
+  return { processed: stuck.length, submissionIds: ids };
 }

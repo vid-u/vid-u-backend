@@ -6,9 +6,21 @@ import {
   SubmissionStatus,
   UserRole,
 } from "../generated/prisma/enums.js";
+import { randomUUID } from "node:crypto";
 import type { Campaign, Submission } from "../generated/prisma/client.js";
 import { Prisma } from "../generated/prisma/client.js";
-import { stubTxSignature } from "../lib/stubChain.js";
+import { solanaBackendConfigured, solanaRpcConfigured } from "../lib/solana/config.js";
+import {
+  allocateSubmissionOnChain,
+  reallocateSubmissionOnChain,
+  rejectSubmissionOnChain,
+} from "../lib/solana/escrow.js";
+import { retryWithBackoff } from "../lib/solana/retry.js";
+import { verifyAllocateSubmissionTx } from "../lib/solana/verify-campaign-tx.js";
+import {
+  verifyApproveSubmissionTx,
+  verifyRejectSubmissionTx,
+} from "../lib/solana/verify-tx.js";
 import { dec, prisma } from "../lib/prisma.js";
 import { buildPaginationMeta, pageToOffset } from "../utils/api-response.js";
 import type { SeverityRewards } from "../types/campaign.types.js";
@@ -21,6 +33,7 @@ import type {
 import type { ListSubmissionsQueryDto } from "../validation/submission.schema.js";
 import type { ViewerContext } from "../types/viewer.types.js";
 import {
+  ConflictError,
   ForbiddenError,
   NotFoundError,
   ValidationError,
@@ -160,7 +173,7 @@ function mapSubmissionStatusUi(status: SubmissionStatus): string {
 /** Amount shown to testers as "earned" — net of platform fee (`payouts.testerAmount`). */
 function testerEarnedUsdc(
   s: Pick<Submission, "status" | "payoutAmount"> & {
-    payouts?: { testerAmount: Prisma.Decimal | null }[];
+    payouts?: { testerAmount: Prisma.Decimal | null; txSignature?: string }[];
   },
 ): number | undefined {
   if (s.status !== SubmissionStatus.approved) return undefined;
@@ -174,23 +187,25 @@ const submissionPayoutNetInclude = {
   where: { status: PayoutStatus.completed },
   orderBy: { paidAt: "desc" as const },
   take: 1,
-  select: { testerAmount: true },
+  select: { testerAmount: true, txSignature: true },
 };
 
 /** UI/dashboard-shaped submission (status uses `in-review`; adds campaign title + earned). */
 export function formatSubmissionForApi(
   s: Submission & {
     campaign: Pick<Campaign, "id" | "title" | "clientId">;
-    payouts?: { testerAmount: Prisma.Decimal | null }[];
+    payouts?: { testerAmount: Prisma.Decimal | null; txSignature: string }[];
   },
 ) {
   const earned = testerEarnedUsdc(s);
+  const payoutTxSignature = s.payouts?.[0]?.txSignature;
   return {
     ...submissionToApiShape(s),
     status: mapSubmissionStatusUi(s.status),
     campaign: s.campaign.title,
     campaignTitle: s.campaign.title,
     earned,
+    ...(payoutTxSignature ? { payoutTxSignature } : {}),
     lastUpdated: s.updatedAt.toISOString(),
   };
 }
@@ -419,6 +434,8 @@ export function formatSubmissionDetailForApi(s: SubmissionDetailRow) {
 
   const activities = mapSubmissionLogsToActivities(s.logs, s.title);
 
+  const payoutTxSignature = s.payouts?.[0]?.txSignature;
+
   return {
     ...submissionToApiShape(s),
     status: mapSubmissionStatusUi(s.status),
@@ -428,10 +445,13 @@ export function formatSubmissionDetailForApi(s: SubmissionDetailRow) {
     campaignTitle: s.campaign.title,
     campaignVisibility: s.campaign.visibility,
     campaignListed: s.campaign.listed,
+    campaignEscrowPda: s.campaign.escrowPda,
+    ...(payoutTxSignature ? { payoutTxSignature } : {}),
     earned,
     submittedBy: {
       id: s.tester.id,
       displayName: displayNameForUser(s.tester),
+      walletAddress: s.tester.walletAddress,
     },
     comments,
     activities,
@@ -461,6 +481,7 @@ type SubmissionListRow = Prisma.SubmissionGetPayload<{
 
 function submissionToListItem(s: SubmissionListRow) {
   const earned = testerEarnedUsdc(s);
+  const payoutTxSignature = s.payouts?.[0]?.txSignature;
   return {
     id: s.id,
     title: s.title,
@@ -475,6 +496,7 @@ function submissionToListItem(s: SubmissionListRow) {
     submittedAt: s.submittedAt.toISOString(),
     lastUpdated: s.updatedAt.toISOString(),
     earned,
+    ...(payoutTxSignature ? { payoutTxSignature } : {}),
     submittedBy: {
       id: s.tester.id,
       displayName: displayNameForUser(s.tester),
@@ -583,83 +605,200 @@ export async function createSubmission(
     submittedAt.getTime() + reviewDays * 24 * 60 * 60 * 1000,
   );
 
-  const allocateTx = stubTxSignature("allocate");
+  const tester = await prisma.user.findUnique({
+    where: { id: testerId },
+    select: { walletAddress: true },
+  });
+  if (!tester?.walletAddress?.trim()) {
+    throw new ValidationError("Tester profile must have a Solana wallet address before submitting");
+  }
+  const testerWallet = tester.walletAddress.trim();
+
+  const chainRecovery =
+    "chainRecovery" in data && data.chainRecovery ? data.chainRecovery : undefined;
+
+  if (!chainRecovery && !solanaBackendConfigured()) {
+    throw new ValidationError(
+      "Solana backend is not configured. Set SOLANA_RPC_URL, BUGHYVE_PROGRAM_ID (or rely on bundled IDL), and BACKEND_AUTHORITY_SECRET for allocate_submission.",
+    );
+  }
+
+  let submissionId: string;
+  let allocateTx: string;
+
+  if (chainRecovery) {
+    if (!solanaRpcConfigured()) {
+      throw new ValidationError("SOLANA_RPC_URL is required to verify chainRecovery.");
+    }
+    try {
+      await verifyAllocateSubmissionTx(chainRecovery.allocateTxSignature, {
+        campaignUuid: data.campaignId,
+        submissionUuid: chainRecovery.submissionId,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Recovery verification failed";
+      throw new ValidationError(msg);
+    }
+
+    const existing = await prisma.submission.findUnique({
+      where: { id: chainRecovery.submissionId },
+      include: { campaign: true },
+    });
+    if (existing) {
+      if (existing.testerId !== testerId || existing.campaignId !== data.campaignId) {
+        throw new ForbiddenError();
+      }
+      return {
+        submission: formatSubmissionForApi(existing),
+        chain: {
+          pendingProgramConfirmation: false,
+          allocateTx: chainRecovery.allocateTxSignature,
+          idempotent: true,
+        },
+      };
+    }
+
+    submissionId = chainRecovery.submissionId;
+    allocateTx = chainRecovery.allocateTxSignature;
+  } else {
+    submissionId = randomUUID();
+    try {
+      allocateTx = await allocateSubmissionOnChain({
+        campaignUuid: data.campaignId,
+        submissionUuid: submissionId,
+        testerWalletBase58: testerWallet,
+        allocationUsdc: allocation,
+        expiresAt,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "On-chain allocation failed";
+      throw new ValidationError(msg);
+    }
+  }
+
   const attachmentUrls = mergedAttachmentUrls(data);
   const resourceLinks = normalizeUrlList(data.links);
 
-  const result = await prisma.$transaction(async (tx) => {
-    const sub =
-      data.kind === "feedback"
-        ? await tx.submission.create({
-            data: {
-              campaignId: data.campaignId,
-              testerId,
-              kind: SubmissionKind.feedback,
-              title: feedbackTitleFromBody(data.feedback),
-              description: data.feedback.trim(),
-              stepsToReproduce: "",
-              expectedBehavior: null,
-              actualBehavior: null,
-              devices: [],
-              browser: null,
-              additionalNotes: null,
-              videoUrl: null,
-              deviceInfo: undefined,
-              severity: SubmissionSeverity.mild,
-              status: SubmissionStatus.submitted,
-              allocatedAmount: allocation,
-              evidenceUrls: attachmentUrls,
-              resourceLinks,
-              expiresAt,
-            },
-          })
-        : await tx.submission.create({
-            data: {
-              campaignId: data.campaignId,
-              testerId,
-              kind: SubmissionKind.bug,
-              title: data.title,
-              description: data.description,
-              stepsToReproduce: data.stepsToReproduce,
-              expectedBehavior: data.expectedBehavior?.trim() || null,
-              actualBehavior: data.actualBehavior?.trim() || null,
-              devices: data.devices,
-              browser: data.browser?.trim() || null,
-              additionalNotes: data.additionalNotes?.trim() || null,
-              videoUrl: data.videoLink?.trim() || null,
-              deviceInfo: buildDeviceInfo({
-                devices: data.devices,
-                browser: data.browser,
-                deviceInfo: data.deviceInfo,
-              }),
-              severity: data.severity,
-              status: SubmissionStatus.submitted,
-              allocatedAmount: allocation,
-              evidenceUrls: attachmentUrls,
-              resourceLinks,
-              expiresAt,
-            },
-          });
+  let result;
+  try {
+    result = await retryWithBackoff(() =>
+      prisma.$transaction(async (tx) => {
+        const c = await tx.campaign.findUniqueOrThrow({ where: { id: data.campaignId } });
+        if (c.availableBalance.lt(allocation)) {
+          throw new ValidationError(
+            "Insufficient available balance for this allocation (campaign may need top-up)",
+          );
+        }
 
-    await tx.submissionLog.create({
-      data: {
-        submissionId: sub.id,
-        actorId: testerId,
-        eventType: "submission_created",
-        metadata: { pendingAllocateTx: allocateTx },
-      },
-    });
+        const sub =
+          data.kind === "feedback"
+            ? await tx.submission.create({
+                data: {
+                  id: submissionId,
+                  campaignId: data.campaignId,
+                  testerId,
+                  kind: SubmissionKind.feedback,
+                  title: feedbackTitleFromBody(data.feedback),
+                  description: data.feedback.trim(),
+                  stepsToReproduce: "",
+                  expectedBehavior: null,
+                  actualBehavior: null,
+                  devices: [],
+                  browser: null,
+                  additionalNotes: null,
+                  videoUrl: null,
+                  deviceInfo: undefined,
+                  severity: SubmissionSeverity.mild,
+                  status: SubmissionStatus.submitted,
+                  allocatedAmount: allocation,
+                  evidenceUrls: attachmentUrls,
+                  resourceLinks,
+                  expiresAt,
+                },
+              })
+            : await tx.submission.create({
+                data: {
+                  id: submissionId,
+                  campaignId: data.campaignId,
+                  testerId,
+                  kind: SubmissionKind.bug,
+                  title: data.title,
+                  description: data.description,
+                  stepsToReproduce: data.stepsToReproduce,
+                  expectedBehavior: data.expectedBehavior?.trim() || null,
+                  actualBehavior: data.actualBehavior?.trim() || null,
+                  devices: data.devices,
+                  browser: data.browser?.trim() || null,
+                  additionalNotes: data.additionalNotes?.trim() || null,
+                  videoUrl: data.videoLink?.trim() || null,
+                  deviceInfo: buildDeviceInfo({
+                    devices: data.devices,
+                    browser: data.browser,
+                    deviceInfo: data.deviceInfo,
+                  }),
+                  severity: data.severity,
+                  status: SubmissionStatus.submitted,
+                  allocatedAmount: allocation,
+                  evidenceUrls: attachmentUrls,
+                  resourceLinks,
+                  expiresAt,
+                },
+              });
 
-    await tx.campaign.update({
-      where: { id: campaign.id },
-      data: {
-        availableBalance: campaign.availableBalance.minus(allocation),
-        allocatedBalance: campaign.allocatedBalance.plus(allocation),
-      },
-    });
+        await tx.submissionLog.create({
+          data: {
+            submissionId: sub.id,
+            actorId: testerId,
+            eventType: "submission_created",
+            metadata: { allocateTx },
+          },
+        });
 
-    return sub;
-  });
+        await tx.campaign.update({
+          where: { id: c.id },
+          data: {
+            availableBalance: c.availableBalance.minus(allocation),
+            allocatedBalance: c.allocatedBalance.plus(allocation),
+          },
+        });
+
+        return sub;
+      }),
+    );
+  } catch (e) {
+    if (e instanceof ValidationError || e instanceof ForbiddenError) throw e;
+    if (
+      chainRecovery &&
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
+      const row = await prisma.submission.findUnique({
+        where: { id: chainRecovery.submissionId },
+        include: { campaign: true },
+      });
+      if (row && row.testerId === testerId && row.campaignId === data.campaignId) {
+        return {
+          submission: formatSubmissionForApi(row),
+          chain: {
+            pendingProgramConfirmation: false,
+            allocateTx: chainRecovery.allocateTxSignature,
+            idempotent: true,
+          },
+        };
+      }
+    }
+    if (!chainRecovery) {
+      throw new ConflictError(
+        "allocate_submission succeeded but persistence failed. Retry the same request with chainRecovery set to { submissionId, allocateTxSignature } using the ids from this payload.",
+        {
+          code: "ALLOCATE_OK_DB_FAILED",
+          submissionId,
+          allocateTx,
+        },
+      );
+    }
+    throw e;
+  }
 
   const withCampaign = await prisma.submission.findUniqueOrThrow({
     where: { id: result.id },
@@ -669,8 +808,9 @@ export async function createSubmission(
   return {
     submission: formatSubmissionForApi(withCampaign),
     chain: {
-      pendingProgramConfirmation: true,
+      pendingProgramConfirmation: false,
       allocateTx,
+      recovery: Boolean(chainRecovery),
     },
   };
 }
@@ -791,6 +931,16 @@ export async function patchSubmissionSeverity(
   const newAlloc = midpointForSeverity(severity, s.campaign.severityRewards);
   const delta = newAlloc.minus(s.allocatedAmount);
 
+  let reallocateTx: string | undefined;
+  if (solanaBackendConfigured() && !delta.equals(0)) {
+    reallocateTx = await reallocateSubmissionOnChain({
+      campaignUuid: s.campaign.id,
+      submissionUuid: s.id,
+      expectedCurrentUsdc: s.allocatedAmount,
+      newAllocationUsdc: newAlloc,
+    });
+  }
+
   await prisma.$transaction(async (tx) => {
     if (!delta.equals(0)) {
       await tx.campaign.update({
@@ -808,7 +958,7 @@ export async function patchSubmissionSeverity(
       where: { id: submissionId },
       data: {
         severity,
-        allocatedAmount: newAlloc,
+        ...(!delta.equals(0) ? { allocatedAmount: newAlloc } : {}),
         ...(moveToTriaged ? { status: SubmissionStatus.triaged } : {}),
       },
     });
@@ -829,7 +979,10 @@ export async function patchSubmissionSeverity(
         submissionId,
         actorId: clientId,
         eventType: "severity_changed",
-        metadata: { severity },
+        metadata: {
+          severity,
+          ...(reallocateTx ? { reallocateTx } : {}),
+        },
       },
     });
   });
@@ -918,68 +1071,96 @@ export async function approveSubmission(
 
   const lock = s.allocatedAmount;
   let gross: Prisma.Decimal;
-  if (input?.grossUsdc != null) {
-    gross = toDecimal(input.grossUsdc);
-  } else if (input?.severity) {
-    gross = midpointForSeverity(input.severity, s.campaign.severityRewards);
-  } else {
-    gross = s.allocatedAmount;
+  let txSig: string;
+
+  /** Escrow payout matches DB `allocatedAmount` (mirrors on-chain lock after allocate/reallocate). */
+  gross = s.allocatedAmount;
+  if (input?.grossUsdc != null && !gross.equals(toDecimal(input.grossUsdc))) {
+    throw new ValidationError(
+      "grossUsdc must match this submission's current allocated amount. Refresh the page after changing severity, or set the bounty field to the shown escrow amount.",
+    );
   }
+
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError("SOLANA_RPC_URL is required to verify approve_submission.");
+  }
+  const sig = input?.approveTxSignature?.trim();
+  if (!sig) {
+    throw new ValidationError(
+      "approveTxSignature is required (the client must sign approve_submission on-chain).",
+    );
+  }
+  try {
+    await verifyApproveSubmissionTx(sig, {
+      campaignUuid: s.campaignId,
+      submissionUuid: submissionId,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Invalid approve transaction";
+    throw new ValidationError(msg);
+  }
+  if (input?.severity && input.severity !== s.severity) {
+    throw new ValidationError(
+      "severity cannot differ from the submission when approving with a verified on-chain transaction",
+    );
+  }
+  txSig = sig;
 
   const testerShare = gross.times(0.85);
   const platformShare = gross.times(0.15);
-  const txSig = stubTxSignature("approve");
 
-  await prisma.$transaction(async (tx) => {
-    await tx.submission.update({
-      where: { id: submissionId },
-      data: {
-        status: SubmissionStatus.approved,
-        reviewedAt: new Date(),
-        payoutAmount: gross,
-        severity: input?.severity ?? s.severity,
-      },
-    });
+  await retryWithBackoff(() =>
+    prisma.$transaction(async (tx) => {
+      await tx.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: SubmissionStatus.approved,
+          reviewedAt: new Date(),
+          payoutAmount: gross,
+          severity: input?.severity ?? s.severity,
+        },
+      });
 
-    await tx.payout.create({
-      data: {
-        submissionId,
-        testerId: s.testerId,
-        campaignId: s.campaignId,
-        grossAmount: gross,
-        testerAmount: testerShare,
-        platformFee: platformShare,
-        txSignature: txSig,
-        status: PayoutStatus.completed,
-        paidAt: new Date(),
-      },
-    });
+      await tx.payout.create({
+        data: {
+          submissionId,
+          testerId: s.testerId,
+          campaignId: s.campaignId,
+          grossAmount: gross,
+          testerAmount: testerShare,
+          platformFee: platformShare,
+          txSignature: txSig,
+          status: PayoutStatus.completed,
+          paidAt: new Date(),
+        },
+      });
 
-    await tx.campaign.update({
-      where: { id: s.campaignId },
-      data: {
-        allocatedBalance: s.campaign.allocatedBalance.minus(lock),
-        budgetRemaining: s.campaign.budgetRemaining.minus(gross),
-        availableBalance: s.campaign.availableBalance.plus(lock.minus(gross)),
-      },
-    });
+      await tx.campaign.update({
+        where: { id: s.campaignId },
+        data: {
+          allocatedBalance: s.campaign.allocatedBalance.minus(lock),
+          budgetRemaining: s.campaign.budgetRemaining.minus(gross),
+          availableBalance: s.campaign.availableBalance.plus(lock.minus(gross)),
+        },
+      });
 
-    await tx.submissionLog.create({
-      data: {
-        submissionId,
-        actorId: clientId,
-        eventType: "payout_initiated",
-        metadata: { tx: txSig, gross: gross.toString() },
-      },
-    });
-  });
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: clientId,
+          eventType: "payout_initiated",
+          metadata: { tx: txSig, gross: gross.toString() },
+        },
+      });
+    }),
+  );
 
   return {
     payoutTx: txSig,
     grossAmount: gross.toString(),
     testerAmount: testerShare.toString(),
     platformFee: platformShare.toString(),
-    chain: { pendingProgramConfirmation: true },
+    chain: { pendingProgramConfirmation: false },
   };
 }
 
@@ -1002,38 +1183,71 @@ export async function rejectSubmission(
     throw new ValidationError("Submission cannot be rejected in this status");
   }
 
-  const txSig = input.rejectTxSignature ?? stubTxSignature("reject");
+  let txSig: string;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.submission.update({
-      where: { id: submissionId },
-      data: {
-        status: SubmissionStatus.rejected,
-        reviewedAt: new Date(),
-        rejectionText: input.rejectionText,
-      },
-    });
+  if (solanaBackendConfigured()) {
+    try {
+      txSig = await rejectSubmissionOnChain({
+        campaignUuid: s.campaignId,
+        submissionUuid: submissionId,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "On-chain reject failed";
+      throw new ValidationError(msg);
+    }
+  } else if (input.rejectTxSignature?.trim()) {
+    const sig = input.rejectTxSignature.trim();
+    if (!solanaRpcConfigured()) {
+      throw new ValidationError("SOLANA_RPC_URL is required to verify reject_submission.");
+    }
+    try {
+      await verifyRejectSubmissionTx(sig, {
+        campaignUuid: s.campaignId,
+        submissionUuid: submissionId,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Invalid reject transaction";
+      throw new ValidationError(msg);
+    }
+    txSig = sig;
+  } else {
+    throw new ValidationError(
+      "Configure BACKEND_AUTHORITY_SECRET and SOLANA_RPC_URL so the API can sign reject_submission with backend authority. (Optional rejectTxSignature is only for integrations without backend keys.)",
+    );
+  }
 
-    await tx.campaign.update({
-      where: { id: s.campaignId },
-      data: {
-        availableBalance: s.campaign.availableBalance.plus(s.allocatedAmount),
-        allocatedBalance: s.campaign.allocatedBalance.minus(s.allocatedAmount),
-      },
-    });
+  await retryWithBackoff(() =>
+    prisma.$transaction(async (tx) => {
+      await tx.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: SubmissionStatus.rejected,
+          reviewedAt: new Date(),
+          rejectionText: input.rejectionText,
+        },
+      });
 
-    await tx.submissionLog.create({
-      data: {
-        submissionId,
-        actorId: clientId,
-        eventType: "status_changed",
-        metadata: { from: s.status, to: "rejected", rejectTx: txSig },
-      },
-    });
-  });
+      await tx.campaign.update({
+        where: { id: s.campaignId },
+        data: {
+          availableBalance: s.campaign.availableBalance.plus(s.allocatedAmount),
+          allocatedBalance: s.campaign.allocatedBalance.minus(s.allocatedAmount),
+        },
+      });
+
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: clientId,
+          eventType: "status_changed",
+          metadata: { from: s.status, to: "rejected", rejectTx: txSig },
+        },
+      });
+    }),
+  );
 
   return {
     rejectTx: txSig,
-    chain: { pendingProgramConfirmation: true },
+    chain: { pendingProgramConfirmation: false },
   };
 }

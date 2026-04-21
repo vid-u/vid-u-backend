@@ -116,6 +116,8 @@ export type CampaignListPreview = {
   title: string;
   company: string;
   logoUrl?: string;
+  /** Campaign escrow PDA (on-chain account), when funded. */
+  escrowPda: string | null;
   status: string;
   description: string;
   deviceRequirements: DeviceRequirementId[];
@@ -148,6 +150,7 @@ export function serializeCampaignListPreview(
     title: c.title,
     company: opts.companyName,
     logoUrl: opts.logoUrl ?? undefined,
+    escrowPda: c.escrowPda,
     status: c.status,
     description: c.description ?? "",
     deviceRequirements: normalizeDeviceRequirements(c.deviceRequirements),

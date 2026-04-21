@@ -23,7 +23,8 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: sh -c "npm install && npm run dev"
+    # Fresh volumes have an empty DB; migrate deploy creates tables (same as production `npm start`).
+    command: sh -c "npm install && npm run dev:docker"
 
   postgres:
     image: postgres:16

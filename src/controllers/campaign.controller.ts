@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import * as activitiesService from "../services/activities.service.js";
 import * as campaignService from "../services/campaign.service.js";
 import type {
+  CloseCampaignDto,
   ListClientCampaignsQueryDto,
   ListPublicCampaignsQueryDto,
 } from "../validation/campaign.schema.js";
@@ -76,6 +77,26 @@ export async function postFundCampaign(req: Request, res: Response): Promise<voi
   sendSuccess(res, result, "Campaign funded");
 }
 
+/** GET — preview on-chain init+fund for manual recovery when POST /fund failed after a successful tx. */
+export async function getCampaignFundingSync(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  const result = await campaignService.previewCampaignFundingRecovery(
+    id,
+    req.dbUser!.id,
+  );
+  sendSuccess(res, result, "ok");
+}
+
+/** POST — verify and persist funding found on-chain (same outcome as a successful POST /fund). */
+export async function postCampaignFundingSync(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  const result = await campaignService.applyCampaignFundingRecovery(
+    id,
+    req.dbUser!.id,
+  );
+  sendSuccess(res, result, "Campaign funding synced from chain");
+}
+
 export async function postTopUpCampaign(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
   const result = await campaignService.topUpCampaign(
@@ -88,10 +109,7 @@ export async function postTopUpCampaign(req: Request, res: Response): Promise<vo
 
 export async function postCloseCampaign(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
-  const result = await campaignService.closeCampaign(
-    id,
-    req.dbUser!.id,
-    req.body?.closeTxSignature
-  );
+  const body = req.body as CloseCampaignDto;
+  const result = await campaignService.closeCampaign(id, req.dbUser!.id, body.closeTxSignature);
   sendSuccess(res, result, "Campaign ended");
 }

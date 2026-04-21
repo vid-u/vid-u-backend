@@ -27,6 +27,13 @@ export const createBugSubmissionBody = z
     /** External reference URLs (documentation, related issues, etc.). */
     links: z.array(z.string().max(2000)).max(50).default([]),
     severity: z.enum(["critical", "high", "medium", "mild"]),
+    /** Retry after `allocate_submission` succeeded but DB persistence failed. */
+    chainRecovery: z
+      .object({
+        submissionId: uuidString,
+        allocateTxSignature: z.string().min(1),
+      })
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.stepsToReproduce.trim()) {
@@ -71,6 +78,12 @@ export const createFeedbackSubmissionBody = z.object({
   evidenceUrls: z.array(z.string().max(2000)).max(50).optional(),
   /** External reference URLs (documentation, related issues, etc.). */
   links: z.array(z.string().max(2000)).max(50).default([]),
+  chainRecovery: z
+    .object({
+      submissionId: uuidString,
+      allocateTxSignature: z.string().min(1),
+    })
+    .optional(),
 });
 
 /** Not `discriminatedUnion` — bug branch uses `.superRefine` (`ZodEffects`). */
@@ -165,10 +178,12 @@ export const commentBody = z.object({
 export const approveSubmissionBody = z.object({
   severity: z.enum(["critical", "high", "medium", "mild"]).optional(),
   grossUsdc: z.union([z.number(), z.string()]).optional(),
+  approveTxSignature: z.string().min(1).optional(),
 });
 
 export const rejectSubmissionBody = z.object({
   rejectionText: z.string().min(1).max(5000),
+  /** Only if the API cannot use `BACKEND_AUTHORITY` — normal flow signs `reject_submission` on the server. */
   rejectTxSignature: z.string().min(1).optional(),
 });
 

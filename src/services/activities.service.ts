@@ -41,6 +41,7 @@ export async function getCampaignActivities(
         c.title AS campaign_title,
         s.tester_id::text AS user_id,
         u.display_name,
+        u.wallet_address,
         u.avatar_url,
         s.title AS submission_title,
         s.kind::text AS submission_kind,
@@ -60,6 +61,7 @@ export async function getCampaignActivities(
         c.title AS campaign_title,
         p.tester_id::text AS user_id,
         u.display_name,
+        u.wallet_address,
         u.avatar_url,
         sub2.title AS submission_title,
         'payout' AS submission_kind,
@@ -87,6 +89,7 @@ export async function getCampaignActivities(
       user: {
         id: r.user_id,
         displayName: r.display_name,
+        walletAddress: r.wallet_address,
         avatarUrl: r.avatar_url,
       },
     };

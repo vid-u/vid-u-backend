@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "BugHyve API",
-    "description": "HTTP API for the BugHyve platform — bug-bounty campaigns, submissions, payouts, and account flows for clients and testers. Use this collection to call the backend that powers the BugHyve product.",
+    "description": "HTTP API for the BugHyve platform — bug-bounty campaigns, submissions, payouts, and account flows for clients and testers. Use this collection to call the backend that powers the BugHyve product.\n\n**Client → Campaigns:** includes **GET** / **POST** `/client/campaigns/:campaignId/sync-fund` for on-chain funding recovery when `POST .../fund` failed after a successful Solana transaction (see `docs/campaign-funding-sync.md`).\n\n**Response fields:** public campaign list rows include **`escrowPda`** and **`stats.totalPaidToTesters`**; submission list/detail may include **`payoutTxSignature`** and **`campaignEscrowPda`** where applicable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -543,7 +543,7 @@
               "request": {
                 "method": "GET",
                 "header": [],
-                "description": "No auth. **Card previews only** (not full campaign detail). Query: `page` (1-based, default 1), `limit` (1–100, default 20), `status` = `all` | `active` | `paused` | `ended`, `devices` = comma slugs (`iphone,mac`), `q` = search title/description/company, `sort` = `newest` | `most_pay`. **`data`** is the campaigns array; top-level `meta` is pagination.",
+                "description": "No auth. **Card previews only** (not full campaign detail). Query: `page` (1-based, default 1), `limit` (1–100, default 20), `status` = `all` | `active` | `paused` | `ended`, `devices` = comma slugs (`iphone,mac`), `q` = search title/description/company, `sort` = `newest` | `most_pay`. Each row includes **`escrowPda`** (base58 campaign account PDA when funded) and **`stats`**: `testers`, `submissions`, **`totalPaid`** (gross approved), **`totalPaidToTesters`** (net after platform fee). **`data`** is the campaigns array; top-level `meta` is pagination.",
                 "url": {
                   "raw": "{{baseUrl}}/campaigns?page=1&limit=20&status=all&sort=newest",
                   "host": ["{{baseUrl}}"],
@@ -564,7 +564,7 @@
                   "status": "OK",
                   "code": 200,
                   "_postman_previewlanguage": "json",
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"title\": \"Example bounty\",\n      \"company\": \"Acme Inc\",\n      \"logoUrl\": null,\n      \"status\": \"active\",\n      \"description\": \"Short blurb for the card\",\n      \"deviceRequirements\": [\"mac\", \"windows\"],\n      \"createdAt\": \"2026-04-01T00:00:00.000Z\",\n      \"stats\": {\n        \"testers\": 3,\n        \"submissions\": 10,\n        \"totalPaid\": 120.5\n      }\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"title\": \"Example bounty\",\n      \"company\": \"Acme Inc\",\n      \"logoUrl\": null,\n      \"escrowPda\": \"CampaignEscrowPda1111111111111111111111111111111\",\n      \"status\": \"active\",\n      \"description\": \"Short blurb for the card\",\n      \"deviceRequirements\": [\"mac\", \"windows\"],\n      \"createdAt\": \"2026-04-01T00:00:00.000Z\",\n      \"stats\": {\n        \"testers\": 3,\n        \"submissions\": 10,\n        \"totalPaid\": 120.5,\n        \"totalPaidToTesters\": 102.425\n      }\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
                 }
               ]
             },
@@ -674,7 +674,7 @@
                     }
                   ]
                 },
-                "description": "**Tester only.** Lists the current user’s submissions. Query: `page` (default 1), `limit` (default 20). Optional `campaignId`, optional `status` (`submitted` | `in-review` / `in_review` | `approved` | `rejected` | `disputed`). **`data`** is the submissions array; top-level `meta` is pagination. Rows include `status` as `in-review` where applicable, plus `campaign`, `campaignTitle`, `earned`, `lastUpdated`."
+                "description": "**Tester only.** Lists the current user’s submissions. Query: `page` (default 1), `limit` (default 20). Optional `campaignId`, optional `status` (`submitted` | `in-review` / `in_review` | `approved` | `rejected` | `disputed`). **`data`** is the submissions array; top-level `meta` is pagination. Rows include `status` as `in-review` where applicable, plus `campaign`, `campaignTitle`, `earned`, `lastUpdated`, and optional **`payoutTxSignature`** (approve / payout tx) when **`status`** is **`approved`** with a completed payout."
               },
               "response": [
                 {
@@ -688,7 +688,7 @@
                       "value": "application/json"
                     }
                   ],
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Bug title\",\n      \"severity\": \"medium\",\n      \"status\": \"in-review\",\n      \"kind\": \"bug\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"campaign\": \"Campaign title\",\n      \"campaignTitle\": \"Campaign title\",\n      \"description\": \"...\",\n      \"submittedAt\": \"2026-04-13T12:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:10:00.000Z\",\n      \"earned\": null\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Bug title\",\n      \"severity\": \"medium\",\n      \"status\": \"in-review\",\n      \"kind\": \"bug\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"campaign\": \"Campaign title\",\n      \"campaignTitle\": \"Campaign title\",\n      \"description\": \"...\",\n      \"submittedAt\": \"2026-04-13T12:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:10:00.000Z\",\n      \"earned\": null,\n      \"payoutTxSignature\": null\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
                 }
               ]
             },
@@ -782,7 +782,7 @@
                   }
                 ],
                 "url": "{{baseUrl}}/submissions/{{submissionId}}",
-                "description": "Returns **`formatSubmissionDetailForApi`**. Resources are split: **`attachmentUrls`** (files/screenshots), **`videoLink`** (single external recording URL), **`links`** (other external refs — docs, issues). No legacy **`evidenceUrls`** field. Also **`comments`**, **`activities`**, **`submittedBy`**, campaign fields. **`transitionedToInReview`** is always **`false`** for testers."
+                "description": "Returns **`formatSubmissionDetailForApi`**. Resources are split: **`attachmentUrls`** (files/screenshots), **`videoLink`** (single external recording URL), **`links`** (other external refs — docs, issues). No legacy **`evidenceUrls`** field. Also **`comments`**, **`activities`**, **`submittedBy`**, campaign fields, **`campaignEscrowPda`**, and optional **`payoutTxSignature`** when approved with a payout. **`transitionedToInReview`** is always **`false`** for testers."
               },
               "response": [
                 {
@@ -790,7 +790,7 @@
                   "status": "OK",
                   "code": 200,
                   "_postman_previewlanguage": "json",
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"submission\": {\n      \"id\": \"{{submissionId}}\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"kind\": \"bug\",\n      \"title\": \"Typo in profile error message\",\n      \"description\": \"Error says 'recieve' instead of 'receive'.\",\n      \"stepsToReproduce\": \"1. Open profile\\\\n2. Trigger validation error\",\n      \"expectedBehavior\": \"Correct spelling\",\n      \"actualBehavior\": \"Typo in copy\",\n      \"deviceInfo\": \"Mac\",\n      \"device\": \"Mac\",\n      \"devices\": [],\n      \"severity\": \"mild\",\n      \"status\": \"in-review\",\n      \"rejectionText\": null,\n      \"rejectionMessage\": null,\n      \"allocatedAmount\": \"5.00000000\",\n      \"payoutAmount\": null,\n      \"attachmentUrls\": [\n        \"https://cdn.example.com/attachments/screenshot-1.png\",\n        \"https://cdn.example.com/attachments/screen-recording.mp4\"\n      ],\n      \"videoLink\": \"https://www.loom.com/share/repro-session\",\n      \"links\": [\n        \"https://github.com/org/repo/issues/123\",\n        \"https://docs.example.com/error-handling\"\n      ],\n      \"submittedAt\": \"2026-04-11T08:00:00.000Z\",\n      \"reviewedAt\": null,\n      \"expiresAt\": \"2026-04-18T08:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-12T08:00:00.000Z\",\n      \"campaign\": \"MediConnect Health\",\n      \"campaignTitle\": \"MediConnect Health\",\n      \"campaignVisibility\": \"public\",\n      \"campaignListed\": true,\n      \"earned\": null,\n      \"submittedBy\": {\n        \"id\": \"tester-uuid\",\n        \"displayName\": \"John Doe\"\n      },\n      \"comments\": [],\n      \"activities\": [\n        {\n          \"id\": \"log-1\",\n          \"type\": \"created\",\n          \"title\": \"Submission created\",\n          \"description\": \"Bug report \\\"Typo in profile error message\\\" was submitted\",\n          \"timestamp\": \"2026-04-11T08:00:00.000Z\",\n          \"actor\": { \"name\": \"John Doe\", \"role\": \"tester\" }\n        },\n        {\n          \"id\": \"log-2\",\n          \"type\": \"status-changed\",\n          \"title\": \"Status changed to In Review\",\n          \"description\": \"Client opened this submission for review\",\n          \"timestamp\": \"2026-04-11T09:00:00.000Z\",\n          \"actor\": { \"name\": \"Client Co\", \"role\": \"client\" },\n          \"metadata\": { \"oldStatus\": \"submitted\", \"newStatus\": \"in-review\" }\n        }\n      ]\n    },\n    \"transitionedToInReview\": false\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"submission\": {\n      \"id\": \"{{submissionId}}\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"kind\": \"bug\",\n      \"title\": \"Typo in profile error message\",\n      \"description\": \"Error says 'recieve' instead of 'receive'.\",\n      \"stepsToReproduce\": \"1. Open profile\\\\n2. Trigger validation error\",\n      \"expectedBehavior\": \"Correct spelling\",\n      \"actualBehavior\": \"Typo in copy\",\n      \"deviceInfo\": \"Mac\",\n      \"device\": \"Mac\",\n      \"devices\": [],\n      \"severity\": \"mild\",\n      \"status\": \"in-review\",\n      \"rejectionText\": null,\n      \"rejectionMessage\": null,\n      \"allocatedAmount\": \"5.00000000\",\n      \"payoutAmount\": null,\n      \"attachmentUrls\": [\n        \"https://cdn.example.com/attachments/screenshot-1.png\",\n        \"https://cdn.example.com/attachments/screen-recording.mp4\"\n      ],\n      \"videoLink\": \"https://www.loom.com/share/repro-session\",\n      \"links\": [\n        \"https://github.com/org/repo/issues/123\",\n        \"https://docs.example.com/error-handling\"\n      ],\n      \"submittedAt\": \"2026-04-11T08:00:00.000Z\",\n      \"reviewedAt\": null,\n      \"expiresAt\": \"2026-04-18T08:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-12T08:00:00.000Z\",\n      \"campaign\": \"MediConnect Health\",\n      \"campaignTitle\": \"MediConnect Health\",\n      \"campaignVisibility\": \"public\",\n      \"campaignListed\": true,\n      \"campaignEscrowPda\": \"CampaignEscrowPda1111111111111111111111111111111\",\n      \"earned\": null,\n      \"submittedBy\": {\n        \"id\": \"tester-uuid\",\n        \"displayName\": \"John Doe\"\n      },\n      \"comments\": [],\n      \"activities\": [\n        {\n          \"id\": \"log-1\",\n          \"type\": \"created\",\n          \"title\": \"Submission created\",\n          \"description\": \"Bug report \\\"Typo in profile error message\\\" was submitted\",\n          \"timestamp\": \"2026-04-11T08:00:00.000Z\",\n          \"actor\": { \"name\": \"John Doe\", \"role\": \"tester\" }\n        },\n        {\n          \"id\": \"log-2\",\n          \"type\": \"status-changed\",\n          \"title\": \"Status changed to In Review\",\n          \"description\": \"Client opened this submission for review\",\n          \"timestamp\": \"2026-04-11T09:00:00.000Z\",\n          \"actor\": { \"name\": \"Client Co\", \"role\": \"client\" },\n          \"metadata\": { \"oldStatus\": \"submitted\", \"newStatus\": \"in-review\" }\n        }\n      ]\n    },\n    \"transitionedToInReview\": false\n  }\n}"
                 }
               ]
             },
@@ -1148,7 +1148,7 @@
                   }
                 },
                 "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/update",
-                "description": "Strict body: only send fields you change. Supports scope, outOfScope, disclosureGuidelines, rewardEligibility, downloadLinks, startDate/endDate (YYYY-MM-DD), isApproved, severityRewards, etc."
+                "description": "Strict body: only send fields you change. Supports scope, outOfScope, disclosureGuidelines, rewardEligibility, downloadLinks, startDate/endDate (YYYY-MM-DD), isApproved, severityRewards, **`status`**, etc. Changing **`status`** between **`active`** and **`paused`** for a funded campaign (`escrowPda` set) submits **`pause_campaign`** / **`resume_campaign`** on-chain (backend authority) before updating Postgres — requires **`SOLANA_RPC_URL`**, **`BUGHYVE_PROGRAM_ID`**, and **`BACKEND_AUTHORITY_SECRET`**."
               },
               "response": [
                 {
@@ -1192,6 +1192,73 @@
                   "code": 200,
                   "_postman_previewlanguage": "json",
                   "body": "{\n  \"success\": true,\n  \"message\": \"Campaign funded\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"clientId\": \"client-uuid\",\n      \"title\": \"Example\",\n      \"description\": \"\",\n      \"testScope\": \"\",\n      \"outOfScope\": \"\",\n      \"inScopeTestCaseUrl\": \"\",\n      \"disclosureGuidelines\": \"\",\n      \"rewardEligibility\": \"\",\n      \"downloadLinks\": {},\n      \"startDate\": \"2026-04-01\",\n      \"endDate\": \"2026-06-30\",\n      \"isApproved\": false,\n      \"isPrivate\": false,\n      \"visibility\": \"public\",\n      \"listed\": true,\n      \"status\": \"active\",\n      \"budget\": 1000,\n      \"budgetRemaining\": 1000,\n      \"availableBalance\": \"1000\",\n      \"allocatedBalance\": \"0\",\n      \"escrowPda\": \"stubPda_...\",\n      \"reviewWindowDays\": 7,\n      \"creationFeePaid\": true,\n      \"createdAt\": \"2026-04-01T00:00:00.000Z\",\n      \"updatedAt\": \"2026-04-13T12:05:00.000Z\",\n      \"company\": \"Acme Inc\",\n      \"payoutStructure\": { \"mild\": { \"min\": 0, \"max\": 50 }, \"medium\": { \"min\": 50, \"max\": 100 }, \"high\": { \"min\": 100, \"max\": 300 }, \"critical\": { \"min\": 300, \"max\": 500 } },\n      \"deviceRequirements\": [],\n      \"submissionsCount\": 5,\n      \"bugsSubmitted\": 5,\n      \"uniqueTestersCount\": 3\n    },\n    \"chain\": {\n      \"pendingProgramConfirmation\": true,\n      \"escrowPda\": \"stubPda_...\",\n      \"initializeTx\": \"5VERv8NMvzbJMEkV8xnrLkEaWRt16ssBAPyGjYKrQZ\",\n      \"fundTx\": \"3EqYKDVLun73XmHmCLGAYZdi8v5ZK4Vw\"\n    }\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "GET /client/campaigns/:id/sync-fund",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/sync-fund",
+                "description": "**Client only.** Preview on-chain `initialize_campaign` + `fund_campaign` for this campaign (same wallet as profile) since campaign creation — **no DB write**. Use after Solana succeeded but **`POST .../fund`** failed. Requires **`SOLANA_RPC_URL`**. See **`docs/campaign-funding-sync.md`**."
+              },
+              "response": [
+                {
+                  "name": "200 — recoverable",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"alreadyFunded\": false,\n    \"recoverable\": true,\n    \"escrowPda\": \"CampaignPdaBase58...\",\n    \"initializeTxSignature\": \"5VERv8NMvzbJMEkV8xnrLkEaWRt16ssBAPyGjYKrQZ\",\n    \"fundTxSignature\": \"5VERv8NMvzbJMEkV8xnrLkEaWRt16ssBAPyGjYKrQZ\",\n    \"fundedUsdc\": \"1000.00000000\",\n    \"message\": \"On-chain funding found. POST the same path to record it in BugHyve (or retry if this preview was interrupted).\"\n  }\n}"
+                },
+                {
+                  "name": "200 — nothing to recover",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"alreadyFunded\": false,\n    \"recoverable\": false,\n    \"escrowPda\": \"CampaignPdaBase58...\",\n    \"message\": \"No matching initialize_campaign + fund_campaign found on-chain for this campaign since it was created. Use the same wallet and cluster as in the app.\"\n  }\n}"
+                },
+                {
+                  "name": "200 — already funded in DB",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"alreadyFunded\": true,\n    \"escrowPda\": \"CampaignPdaBase58...\",\n    \"message\": \"Campaign funding is already recorded.\"\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "POST /client/campaigns/:id/sync-fund",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": "{{baseUrl}}/client/campaigns/{{campaignId}}/sync-fund",
+                "description": "**Client only.** Scan the chain (same as GET), then **verify** init/fund like **`POST .../fund`** and **persist** campaign + fee rows. **No request body.** Idempotent with **`GET`**: if nothing on-chain, returns **400** with a clear message. See **`docs/campaign-funding-sync.md`**."
+              },
+              "response": [
+                {
+                  "name": "200 — synced from chain",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Campaign funding synced from chain\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"status\": \"active\",\n      \"escrowPda\": \"CampaignPdaBase58...\",\n      \"creationFeePaid\": true,\n      \"budget\": 1000\n    },\n    \"chain\": {\n      \"pendingProgramConfirmation\": false,\n      \"escrowPda\": \"CampaignPdaBase58...\",\n      \"initializeTx\": \"5VERv8NMvzbJMEkV8xnrLkEaWRt16ssBAPyGjYKrQZ\",\n      \"fundTx\": \"5VERv8NMvzbJMEkV8xnrLkEaWRt16ssBAPyGjYKrQZ\",\n      \"recoveredFromChain\": true\n    }\n  }\n}"
+                },
+                {
+                  "name": "400 — no on-chain match",
+                  "status": "Bad Request",
+                  "code": 400,
+                  "_postman_previewlanguage": "json",
+                  "body": "{\n  \"success\": false,\n  \"message\": \"No on-chain funding found to recover. Run GET …/sync-fund to preview, or confirm wallet and RPC cluster.\"\n}"
                 }
               ]
             },
@@ -1343,7 +1410,7 @@
                     }
                   ]
                 },
-                "description": "**Client only.** Lists your submissions. Query: **`page`**, **`limit`**, optional **`campaignId`** (scope to one campaign), optional **`status`**. Omit **`campaignId`** to list across all campaigns you own. **`data`** is the submissions array; top-level `meta` is pagination. Rows include `status` as `in-review` where applicable, plus `campaign`, `campaignTitle`, `earned`, `lastUpdated`."
+                "description": "**Client only.** Lists your submissions. Query: **`page`**, **`limit`**, optional **`campaignId`** (scope to one campaign), optional **`status`**. Omit **`campaignId`** to list across all campaigns you own. **`data`** is the submissions array; top-level `meta` is pagination. Rows include `status` as `in-review` where applicable, plus `campaign`, `campaignTitle`, `earned`, `lastUpdated`, and optional **`payoutTxSignature`** (approve / payout tx) when **`status`** is **`approved`** with a completed payout."
               },
               "response": [
                 {
@@ -1357,7 +1424,7 @@
                       "value": "application/json"
                     }
                   ],
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Bug title\",\n      \"severity\": \"medium\",\n      \"status\": \"in-review\",\n      \"kind\": \"bug\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"campaign\": \"Campaign title\",\n      \"campaignTitle\": \"Campaign title\",\n      \"description\": \"...\",\n      \"submittedAt\": \"2026-04-13T12:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:10:00.000Z\",\n      \"earned\": null\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Bug title\",\n      \"severity\": \"medium\",\n      \"status\": \"in-review\",\n      \"kind\": \"bug\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"campaign\": \"Campaign title\",\n      \"campaignTitle\": \"Campaign title\",\n      \"description\": \"...\",\n      \"submittedAt\": \"2026-04-13T12:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:10:00.000Z\",\n      \"earned\": null,\n      \"payoutTxSignature\": null\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1,\n    \"current_page\": 1,\n    \"items_per_page\": 20,\n    \"total_items\": 1\n  }\n}"
                 }
               ]
             },
@@ -1372,7 +1439,7 @@
                   }
                 ],
                 "url": "{{baseUrl}}/client/submissions/{{submissionId}}",
-                "description": "Same **`submission`** shape as **`GET /submissions/:id`** (`formatSubmissionDetailForApi`): resources split into **`attachmentUrls`**, **`videoLink`**, **`links`** (no legacy **`evidenceUrls`**); plus **`comments`**, **`activities`**, **`submittedBy`**, etc. When the submission was **`submitted`** and the client opens it, the server moves it to **`in-review`** and sets **`transitionedToInReview`: true** (first time only)."
+                "description": "Same **`submission`** shape as **`GET /submissions/:id`** (`formatSubmissionDetailForApi`): resources split into **`attachmentUrls`**, **`videoLink`**, **`links`** (no legacy **`evidenceUrls`**); plus **`comments`**, **`activities`**, **`submittedBy`**, **`campaignEscrowPda`**, optional **`payoutTxSignature`**, etc. When the submission was **`submitted`** and the client opens it, the server moves it to **`in-review`** and sets **`transitionedToInReview`: true** (first time only)."
               },
               "response": [
                 {
@@ -1380,7 +1447,7 @@
                   "status": "OK",
                   "code": 200,
                   "_postman_previewlanguage": "json",
-                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"submission\": {\n      \"id\": \"{{submissionId}}\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"kind\": \"bug\",\n      \"title\": \"Typo in profile error message\",\n      \"description\": \"Error says 'recieve' instead of 'receive'.\",\n      \"stepsToReproduce\": \"1. Open profile\\\\n2. Trigger validation error\",\n      \"expectedBehavior\": \"Correct spelling\",\n      \"actualBehavior\": \"Typo in copy\",\n      \"deviceInfo\": \"Mac\",\n      \"device\": \"Mac\",\n      \"devices\": [],\n      \"severity\": \"mild\",\n      \"status\": \"in-review\",\n      \"rejectionText\": null,\n      \"rejectionMessage\": null,\n      \"allocatedAmount\": \"5.00000000\",\n      \"payoutAmount\": null,\n      \"attachmentUrls\": [\n        \"https://cdn.example.com/attachments/screenshot-1.png\",\n        \"https://cdn.example.com/attachments/screen-recording.mp4\"\n      ],\n      \"videoLink\": \"https://www.loom.com/share/repro-session\",\n      \"links\": [\n        \"https://github.com/org/repo/issues/123\",\n        \"https://docs.example.com/error-handling\"\n      ],\n      \"submittedAt\": \"2026-04-11T08:00:00.000Z\",\n      \"reviewedAt\": null,\n      \"expiresAt\": \"2026-04-18T08:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:01:00.000Z\",\n      \"campaign\": \"MediConnect Health\",\n      \"campaignTitle\": \"MediConnect Health\",\n      \"campaignVisibility\": \"public\",\n      \"campaignListed\": true,\n      \"earned\": null,\n      \"submittedBy\": {\n        \"id\": \"tester-uuid\",\n        \"displayName\": \"John Doe\"\n      },\n      \"comments\": [],\n      \"activities\": [\n        {\n          \"id\": \"log-1\",\n          \"type\": \"created\",\n          \"title\": \"Submission created\",\n          \"description\": \"Bug report \\\"Typo in profile error message\\\" was submitted\",\n          \"timestamp\": \"2026-04-11T08:00:00.000Z\",\n          \"actor\": { \"name\": \"John Doe\", \"role\": \"tester\" }\n        },\n        {\n          \"id\": \"log-2\",\n          \"type\": \"status-changed\",\n          \"title\": \"Status changed to In Review\",\n          \"description\": \"Status changed from submitted to in-review\",\n          \"timestamp\": \"2026-04-13T12:01:00.000Z\",\n          \"actor\": { \"name\": \"Acme Inc\", \"role\": \"client\" },\n          \"metadata\": { \"oldStatus\": \"submitted\", \"newStatus\": \"in-review\" }\n        }\n      ]\n    },\n    \"transitionedToInReview\": true\n  }\n}"
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"submission\": {\n      \"id\": \"{{submissionId}}\",\n      \"campaignId\": \"{{campaignId}}\",\n      \"testerId\": \"tester-uuid\",\n      \"kind\": \"bug\",\n      \"title\": \"Typo in profile error message\",\n      \"description\": \"Error says 'recieve' instead of 'receive'.\",\n      \"stepsToReproduce\": \"1. Open profile\\\\n2. Trigger validation error\",\n      \"expectedBehavior\": \"Correct spelling\",\n      \"actualBehavior\": \"Typo in copy\",\n      \"deviceInfo\": \"Mac\",\n      \"device\": \"Mac\",\n      \"devices\": [],\n      \"severity\": \"mild\",\n      \"status\": \"in-review\",\n      \"rejectionText\": null,\n      \"rejectionMessage\": null,\n      \"allocatedAmount\": \"5.00000000\",\n      \"payoutAmount\": null,\n      \"attachmentUrls\": [\n        \"https://cdn.example.com/attachments/screenshot-1.png\",\n        \"https://cdn.example.com/attachments/screen-recording.mp4\"\n      ],\n      \"videoLink\": \"https://www.loom.com/share/repro-session\",\n      \"links\": [\n        \"https://github.com/org/repo/issues/123\",\n        \"https://docs.example.com/error-handling\"\n      ],\n      \"submittedAt\": \"2026-04-11T08:00:00.000Z\",\n      \"reviewedAt\": null,\n      \"expiresAt\": \"2026-04-18T08:00:00.000Z\",\n      \"lastUpdated\": \"2026-04-13T12:01:00.000Z\",\n      \"campaign\": \"MediConnect Health\",\n      \"campaignTitle\": \"MediConnect Health\",\n      \"campaignVisibility\": \"public\",\n      \"campaignListed\": true,\n      \"campaignEscrowPda\": \"CampaignEscrowPda1111111111111111111111111111111\",\n      \"earned\": null,\n      \"submittedBy\": {\n        \"id\": \"tester-uuid\",\n        \"displayName\": \"John Doe\"\n      },\n      \"comments\": [],\n      \"activities\": [\n        {\n          \"id\": \"log-1\",\n          \"type\": \"created\",\n          \"title\": \"Submission created\",\n          \"description\": \"Bug report \\\"Typo in profile error message\\\" was submitted\",\n          \"timestamp\": \"2026-04-11T08:00:00.000Z\",\n          \"actor\": { \"name\": \"John Doe\", \"role\": \"tester\" }\n        },\n        {\n          \"id\": \"log-2\",\n          \"type\": \"status-changed\",\n          \"title\": \"Status changed to In Review\",\n          \"description\": \"Status changed from submitted to in-review\",\n          \"timestamp\": \"2026-04-13T12:01:00.000Z\",\n          \"actor\": { \"name\": \"Acme Inc\", \"role\": \"client\" },\n          \"metadata\": { \"oldStatus\": \"submitted\", \"newStatus\": \"in-review\" }\n        }\n      ]\n    },\n    \"transitionedToInReview\": true\n  }\n}"
                 }
               ]
             },
@@ -1507,14 +1574,15 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"rejectionText\": \"Does not reproduce on latest build.\",\n  \"rejectTxSignature\": \"optionalOnChainSig\"\n}",
+                  "raw": "{\n  \"rejectionText\": \"Does not reproduce on latest build.\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
                 },
-                "url": "{{baseUrl}}/client/submissions/{{submissionId}}/reject"
+                "url": "{{baseUrl}}/client/submissions/{{submissionId}}/reject",
+                "description": "**Client only.** When **`BACKEND_AUTHORITY_SECRET`** + **`SOLANA_RPC_URL`** are set, the API signs **`reject_submission`** with the backend authority (not the browser wallet). Body is only **`rejectionText`**. Optional **`rejectTxSignature`** is for rare setups without backend keys."
               },
               "response": [
                 {
@@ -1725,14 +1793,14 @@
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"check-expired\",\n  \"data\": {\n    \"processed\": 2,\n    \"submissionIds\": [\"uuid-1\", \"uuid-2\"],\n    \"txSignatures\": [\"release_expired_stub_...\", \"release_expired_stub_...\"]\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"message\": \"check-expired\",\n  \"data\": {\n    \"processed\": 2,\n    \"submissionIds\": [\"uuid-1\", \"uuid-2\"]\n  }\n}"
             },
             {
               "name": "200 check-expired (no CRON_SECRET, non-production)",
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"check-expired\",\n  \"data\": {\n    \"processed\": 0,\n    \"submissionIds\": [],\n    \"txSignatures\": [],\n    \"warning\": \"CRON_SECRET not set — allowed in non-production only\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"message\": \"check-expired\",\n  \"data\": {\n    \"processed\": 0,\n    \"submissionIds\": [],\n    \"warning\": \"CRON_SECRET not set — allowed in non-production only\"\n  }\n}"
             },
             {
               "name": "403 Invalid cron secret",

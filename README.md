@@ -2,14 +2,14 @@
 
 Backend service for **BugHyve** — a human QA marketplace where clients fund bug-bounty-style campaigns on Solana and testers submit findings for review and payout.
 
-This repo is the **Node.js / Express** layer: it owns **business rules**, talks to **Supabase Postgres** (via Prisma), verifies **Supabase Auth** JWTs, can issue **presigned URLs** for **Cloudflare R2** uploads, and is the place where **Solana transaction confirmation** and on-chain state sync with the database will live as the stack matures.
+This repo is the **Node.js / Express** layer: it owns **business rules**, talks to **Supabase Postgres** (via Prisma), verifies **Supabase Auth** JWTs, can issue **presigned URLs** for **Cloudflare R2** uploads, and coordinates **Solana** work: verifying client-signed transactions (fund, approve, …), signing **backend authority** instructions (`allocate_submission`, `pause_campaign` / `resume_campaign`, optional `reject_submission`), and keeping **Postgres** aligned with on-chain escrow after RPC confirmation.
 
 ## How this fits the monorepo
 
 | Piece                                                    | Role                                                                                                                                                                                                      |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[`bughyve-web-solana`](../bughyve-web-solana/)**       | React (Vite) app. Point its API base URL at this server (e.g. `http://localhost:3001` in dev). Users sign in with a wallet + Supabase session, then call protected routes with `Authorization: Bearer …`. |
-| **This API**                                             | Source of truth for app data in Postgres; coordinates campaign lifecycle, submissions, and (eventually) escrow/payout flows with the chain.                                                               |
+| **This API**                                             | Source of truth for app data in Postgres; campaign lifecycle, submissions, escrow-backed balances, and payout rows aligned with the Anchor program.                                                      |
 | **[`bughyve-escrow-solana`](../bughyve-escrow-solana/)** | Anchor program — campaign PDAs, USDC escrow, payouts. The app and API align with program accounts and instructions described in the architecture doc.                                                     |
 
 Design details, schema, and flows: **[MVP architecture & spec](../bughyve-mvp-architecture-solana/bughyve-mvp-architecture.md)**.
@@ -24,6 +24,9 @@ Design details, schema, and flows: **[MVP architecture & spec](../bughyve-mvp-ar
 - **[Supabase setup](./docs/supabase-setup.md)** — database URL, keys, auth sync
 - **[Cloudflare R2](./docs/cloudflare-r2.md)** — optional file uploads
 - **[Deployment](./docs/deployment.md)** — production build, env, Railway notes
+- **[Campaign funding sync](./docs/campaign-funding-sync.md)** — `GET`/`POST` `/client/campaigns/:id/sync-fund` when Solana funded but `/fund` API failed
+
+See **[`docs/README.md`](./docs/README.md)** for the full index.
 
 ## Run locally (Supabase Postgres)
 

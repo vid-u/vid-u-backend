@@ -14,7 +14,21 @@ import {
   BUGHYVE_STANDARD_DISCLOSURE_GUIDELINES,
   BUGHYVE_STANDARD_REWARD_ELIGIBILITY,
 } from "../lib/bughyve-campaign-standards.js";
-import { stubEscrowPda, stubTxSignature } from "../lib/stubChain.js";
+import { deriveCampaignEscrowPdaBase58 } from "../lib/solana/campaignPda.js";
+import { usdcToRawAmount } from "../lib/solana/amounts.js";
+import {
+  getCampaignAccountOnChain,
+  pauseCampaignOnChain,
+  resumeCampaignOnChain,
+} from "../lib/solana/escrow.js";
+import { solanaBackendConfigured, solanaRpcConfigured } from "../lib/solana/config.js";
+import { retryWithBackoff } from "../lib/solana/retry.js";
+import { scanCampaignFundingOnChain } from "../lib/solana/scan-campaign-funding.js";
+import {
+  verifyCloseCampaignTx,
+  verifyFundCampaignTx,
+  verifyInitializeCampaignTx,
+} from "../lib/solana/verify-campaign-tx.js";
 import { dec, prisma } from "../lib/prisma.js";
 import { buildPaginationMeta, pageToOffset } from "../utils/api-response.js";
 import type {
@@ -31,6 +45,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "../utils/errors.js";
+import BN from "bn.js";
 
 const campaignInclude = {
   client: { include: { clientProfile: true } },
@@ -137,7 +152,42 @@ function parseOptionalDate(s: string | undefined): Date | undefined {
   return new Date(`${s.trim()}T12:00:00.000Z`);
 }
 
+/** Sum of `allocatedAmount` for submissions still holding vault lock. */
+async function sumPendingEscrowLock(campaignId: string): Promise<Prisma.Decimal> {
+  const agg = await prisma.submission.aggregate({
+    where: {
+      campaignId,
+      status: {
+        in: [
+          SubmissionStatus.submitted,
+          SubmissionStatus.in_review,
+          SubmissionStatus.triaged,
+          /** Escrow may still be locked (e.g. expiry job) until disputed is resolved on-chain. */
+          SubmissionStatus.disputed,
+        ],
+      },
+    },
+    _sum: { allocatedAmount: true },
+  });
+  return agg._sum.allocatedAmount ?? new Prisma.Decimal(0);
+}
+
+/** Fixes DB drift when approve/reject paths failed but submissions are resolved. */
+async function reconcileCampaignAllocatedFromSubmissions(campaignId: string): Promise<void> {
+  const correct = await sumPendingEscrowLock(campaignId);
+  const row = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { allocatedBalance: true },
+  });
+  if (!row || row.allocatedBalance.equals(correct)) return;
+  await prisma.campaign.update({
+    where: { id: campaignId },
+    data: { allocatedBalance: correct },
+  });
+}
+
 async function loadCampaignUi(id: string) {
+  await reconcileCampaignAllocatedFromSubmissions(id);
   const row = await prisma.campaign.findUnique({
     where: { id },
     include: campaignInclude,
@@ -320,6 +370,7 @@ export async function getCampaignForViewer(
   campaignId: string,
   viewer: ViewerContext,
 ) {
+  await reconcileCampaignAllocatedFromSubmissions(campaignId);
   const c = await prisma.campaign.findUnique({
     where: { id: campaignId },
     include: campaignInclude,
@@ -382,6 +433,59 @@ export async function getCampaignPublicBrowse(campaignId: string) {
   );
 }
 
+/** Matches `programs/bughyve_escrow` `state::status` for `CampaignAccount`. */
+const CHAIN_STATUS_ACTIVE = 1;
+const CHAIN_STATUS_PAUSED = 2;
+
+/**
+ * When the client toggles Active ↔ Paused, mirror it on-chain (`pause_campaign` / `resume_campaign`),
+ * both signed by backend authority (same as allocate/reject).
+ */
+async function syncPauseResumeWithChain(
+  c: { id: string; status: CampaignStatus; escrowPda: string | null },
+  nextStatus: CampaignStatus,
+): Promise<void> {
+  if (nextStatus === c.status) return;
+  const toPaused =
+    c.status === CampaignStatus.active && nextStatus === CampaignStatus.paused;
+  const toActive =
+    c.status === CampaignStatus.paused && nextStatus === CampaignStatus.active;
+  if (!toPaused && !toActive) return;
+  if (!c.escrowPda?.trim()) {
+    throw new ValidationError(
+      "Campaign has no on-chain escrow account; pause or resume only apply after the campaign is funded.",
+    );
+  }
+  if (!solanaBackendConfigured()) {
+    throw new ValidationError(
+      "Configure BACKEND_AUTHORITY_SECRET and SOLANA_RPC_URL so the API can pause or resume the on-chain campaign account.",
+    );
+  }
+  const chain = await getCampaignAccountOnChain(c.id);
+  if (!chain) {
+    throw new ValidationError(
+      "Campaign escrow account not found on-chain; check program id and RPC cluster.",
+    );
+  }
+  if (toPaused) {
+    if (chain.status === CHAIN_STATUS_PAUSED) return;
+    if (chain.status !== CHAIN_STATUS_ACTIVE) {
+      throw new ValidationError(
+        "On-chain campaign is not active; cannot pause. Check the escrow account on-chain or refresh.",
+      );
+    }
+    await pauseCampaignOnChain({ campaignUuid: c.id });
+    return;
+  }
+  if (chain.status === CHAIN_STATUS_ACTIVE) return;
+  if (chain.status !== CHAIN_STATUS_PAUSED) {
+    throw new ValidationError(
+      "On-chain campaign is not paused; cannot resume. Check the escrow account on-chain or refresh.",
+    );
+  }
+  await resumeCampaignOnChain({ campaignUuid: c.id });
+}
+
 export async function patchCampaign(
   campaignId: string,
   clientId: string,
@@ -408,6 +512,10 @@ export async function patchCampaign(
     throw new ValidationError(
       "Fund your campaign to initialize escrow before listing.",
     );
+  }
+
+  if (data.status !== undefined && data.status !== c.status) {
+    await syncPauseResumeWithChain(c, data.status);
   }
 
   await prisma.campaign.update({
@@ -473,41 +581,229 @@ export async function fundCampaign(
   const funded = toDecimal(input.fundedUsdc);
   const creationFee = toDecimal("25");
 
-  const escrowPda = stubEscrowPda(campaignId);
+  const escrowPda = deriveCampaignEscrowPdaBase58(campaignId);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.campaignFee.create({
-      data: {
-        campaignId,
-        clientId,
-        amount: creationFee,
-        txSignature: input.initializeTxSignature || stubTxSignature("fee"),
-      },
-    });
-
-    await tx.campaign.update({
-      where: { id: campaignId },
-      data: {
-        escrowPda,
-        creationFeePaid: true,
-        budget: funded,
-        budgetRemaining: funded,
-        availableBalance: funded,
-        allocatedBalance: new Prisma.Decimal(0),
-        status: CampaignStatus.active,
-        listed: false,
-      },
-    });
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError(
+      "SOLANA_RPC_URL is required to verify initialize_campaign and fund_campaign transactions.",
+    );
+  }
+  const clientUser = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { walletAddress: true },
   });
+  if (!clientUser?.walletAddress?.trim()) {
+    throw new ValidationError("Client must have a Solana wallet before funding a campaign.");
+  }
+  const clientWallet = clientUser.walletAddress.trim();
+  try {
+    await verifyInitializeCampaignTx(input.initializeTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: clientWallet,
+    });
+    await verifyFundCampaignTx(input.fundTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: clientWallet,
+      expectedAmountMicro: BigInt(usdcToRawAmount(funded).toString()),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "On-chain funding verification failed";
+    throw new ValidationError(msg);
+  }
+
+  await retryWithBackoff(() =>
+    prisma.$transaction(async (tx) => {
+      await tx.campaignFee.create({
+        data: {
+          campaignId,
+          clientId,
+          amount: creationFee,
+          txSignature: input.initializeTxSignature,
+        },
+      });
+
+      await tx.campaign.update({
+        where: { id: campaignId },
+        data: {
+          escrowPda,
+          creationFeePaid: true,
+          budget: funded,
+          budgetRemaining: funded,
+          availableBalance: funded,
+          allocatedBalance: new Prisma.Decimal(0),
+          status: CampaignStatus.active,
+          listed: false,
+        },
+      });
+    }),
+  );
 
   const campaign = await loadCampaignUi(campaignId);
   return {
     campaign,
     chain: {
-      pendingProgramConfirmation: true,
+      pendingProgramConfirmation: false,
       escrowPda,
       initializeTx: input.initializeTxSignature,
       fundTx: input.fundTxSignature,
+    },
+  };
+}
+
+async function requireClientSolanaWallet(clientId: string): Promise<string> {
+  const clientUser = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { walletAddress: true },
+  });
+  if (!clientUser?.walletAddress?.trim()) {
+    throw new ValidationError(
+      "Client must have a Solana wallet before syncing funding.",
+    );
+  }
+  return clientUser.walletAddress.trim();
+}
+
+/**
+ * Scan chain for `initialize_campaign` + `fund_campaign` for this campaign since creation (GET preview).
+ */
+export async function previewCampaignFundingRecovery(
+  campaignId: string,
+  clientId: string,
+) {
+  const c = await prisma.campaign.findFirst({
+    where: { id: campaignId, clientId },
+  });
+  if (!c) throw new NotFoundError("Campaign not found");
+  if (c.escrowPda) {
+    return {
+      alreadyFunded: true as const,
+      escrowPda: c.escrowPda,
+      message: "Campaign funding is already recorded.",
+    };
+  }
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError(
+      "SOLANA_RPC_URL is required to scan the chain for funding transactions.",
+    );
+  }
+  const wallet = await requireClientSolanaWallet(clientId);
+  const recovered = await scanCampaignFundingOnChain({
+    campaignUuid: campaignId,
+    clientWalletBase58: wallet,
+    campaignCreatedAt: c.createdAt,
+  });
+  const escrowPda = deriveCampaignEscrowPdaBase58(campaignId);
+  if (!recovered) {
+    return {
+      alreadyFunded: false as const,
+      recoverable: false as const,
+      escrowPda,
+      message:
+        "No matching initialize_campaign + fund_campaign found on-chain for this campaign since it was created. Use the same wallet and cluster as in the app.",
+    };
+  }
+  const funded = new Prisma.Decimal(recovered.fundedAmountMicro.toString()).div(
+    1_000_000,
+  );
+  return {
+    alreadyFunded: false as const,
+    recoverable: true as const,
+    escrowPda,
+    initializeTxSignature: recovered.initializeTxSignature,
+    fundTxSignature: recovered.fundTxSignature,
+    fundedUsdc: funded.toFixed(8),
+    message:
+      "On-chain funding found. POST the same path to record it in BugHyve (or retry if this preview was interrupted).",
+  };
+}
+
+/**
+ * Re-run strict verification and apply DB state (POST) when the client funded on-chain but `/fund` failed.
+ */
+export async function applyCampaignFundingRecovery(
+  campaignId: string,
+  clientId: string,
+) {
+  const c = await prisma.campaign.findFirst({
+    where: { id: campaignId, clientId },
+  });
+  if (!c) throw new NotFoundError("Campaign not found");
+  if (c.escrowPda) {
+    throw new ValidationError("Campaign is already funded.");
+  }
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError(
+      "SOLANA_RPC_URL is required to verify funding transactions.",
+    );
+  }
+  const wallet = await requireClientSolanaWallet(clientId);
+  const recovered = await scanCampaignFundingOnChain({
+    campaignUuid: campaignId,
+    clientWalletBase58: wallet,
+    campaignCreatedAt: c.createdAt,
+  });
+  if (!recovered) {
+    throw new ValidationError(
+      "No on-chain funding found to recover. Run GET …/sync-fund to preview, or confirm wallet and RPC cluster.",
+    );
+  }
+
+  const funded = new Prisma.Decimal(recovered.fundedAmountMicro.toString()).div(
+    1_000_000,
+  );
+  const creationFee = toDecimal("25");
+  const escrowPda = deriveCampaignEscrowPdaBase58(campaignId);
+  try {
+    await verifyInitializeCampaignTx(recovered.initializeTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: wallet,
+    });
+    await verifyFundCampaignTx(recovered.fundTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: wallet,
+      expectedAmountMicro: recovered.fundedAmountMicro,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Verification failed";
+    throw new ValidationError(`Recovered transactions failed verification: ${msg}`);
+  }
+
+  await retryWithBackoff(() =>
+    prisma.$transaction(async (tx) => {
+      await tx.campaignFee.create({
+        data: {
+          campaignId,
+          clientId,
+          amount: creationFee,
+          txSignature: recovered.initializeTxSignature,
+        },
+      });
+
+      await tx.campaign.update({
+        where: { id: campaignId },
+        data: {
+          escrowPda,
+          creationFeePaid: true,
+          budget: funded,
+          budgetRemaining: funded,
+          availableBalance: funded,
+          allocatedBalance: new Prisma.Decimal(0),
+          status: CampaignStatus.active,
+          listed: false,
+        },
+      });
+    }),
+  );
+
+  const campaign = await loadCampaignUi(campaignId);
+  return {
+    campaign,
+    chain: {
+      pendingProgramConfirmation: false,
+      escrowPda,
+      initializeTx: recovered.initializeTxSignature,
+      fundTx: recovered.fundTxSignature,
+      recoveredFromChain: true as const,
     },
   };
 }
@@ -524,54 +820,116 @@ export async function topUpCampaign(
   if (!c.escrowPda) throw new ValidationError("Campaign has no escrow yet");
 
   const add = toDecimal(input.amountUsdc);
-  await prisma.campaign.update({
-    where: { id: campaignId },
-    data: {
-      budget: c.budget.plus(add),
-      budgetRemaining: c.budgetRemaining.plus(add),
-      availableBalance: c.availableBalance.plus(add),
-      status:
-        c.status === CampaignStatus.ended ? CampaignStatus.active : c.status,
-    },
+
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError("SOLANA_RPC_URL is required to verify fund_campaign transactions.");
+  }
+  const clientUser = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { walletAddress: true },
   });
+  if (!clientUser?.walletAddress?.trim()) {
+    throw new ValidationError("Client must have a Solana wallet before topping up.");
+  }
+  try {
+    await verifyFundCampaignTx(input.txSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: clientUser.walletAddress.trim(),
+      expectedAmountMicro: BigInt(usdcToRawAmount(add).toString()),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "On-chain top-up verification failed";
+    throw new ValidationError(msg);
+  }
+
+  await retryWithBackoff(() =>
+    prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        budget: c.budget.plus(add),
+        budgetRemaining: c.budgetRemaining.plus(add),
+        availableBalance: c.availableBalance.plus(add),
+        status:
+          c.status === CampaignStatus.ended ? CampaignStatus.active : c.status,
+      },
+    }),
+  );
 
   const campaign = await loadCampaignUi(campaignId);
   return {
     campaign,
-    chain: { pendingProgramConfirmation: true, topUpTx: input.txSignature },
+    chain: { pendingProgramConfirmation: false, topUpTx: input.txSignature },
   };
 }
 
 export async function closeCampaign(
   campaignId: string,
   clientId: string,
-  _closeTxSignature?: string,
+  closeTxSignature: string,
 ) {
+  await reconcileCampaignAllocatedFromSubmissions(campaignId);
   const c = await prisma.campaign.findFirst({
     where: { id: campaignId, clientId },
   });
   if (!c) throw new NotFoundError("Campaign not found");
-  if (c.allocatedBalance.gt(0)) {
+
+  const pendingLock = await sumPendingEscrowLock(campaignId);
+  if (pendingLock.gt(0)) {
     throw new ValidationError(
-      "Cannot close while submissions have allocated funds — resolve submissions first",
+      "Cannot close while open submissions still hold allocated escrow — approve or reject them first.",
     );
   }
+  if (c.escrowPda?.trim() && solanaRpcConfigured()) {
+    try {
+      const onChain = await getCampaignAccountOnChain(campaignId);
+      if (onChain && onChain.allocatedBalance.gt(new BN(0))) {
+        throw new ValidationError(
+          "On-chain escrow still shows locked funds. Resolve submissions or sync funding; then try again.",
+        );
+      }
+    } catch (e) {
+      if (e instanceof ValidationError) throw e;
+      /* Missing campaign account = nothing to close on-chain; verification step will surface issues. */
+    }
+  }
 
-  await prisma.campaign.update({
-    where: { id: campaignId },
-    data: {
-      status: CampaignStatus.ended,
-      budgetRemaining: new Prisma.Decimal(0),
-      availableBalance: new Prisma.Decimal(0),
-    },
+  if (!solanaRpcConfigured()) {
+    throw new ValidationError("SOLANA_RPC_URL is required to verify close_campaign transactions.");
+  }
+  const clientUser = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { walletAddress: true },
   });
+  if (!clientUser?.walletAddress?.trim()) {
+    throw new ValidationError("Client must have a Solana wallet.");
+  }
+  try {
+    await verifyCloseCampaignTx(closeTxSignature, {
+      campaignUuid: campaignId,
+      clientWalletBase58: clientUser.walletAddress.trim(),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "On-chain close verification failed";
+    throw new ValidationError(msg);
+  }
+
+  await retryWithBackoff(() =>
+    prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        status: CampaignStatus.ended,
+        budgetRemaining: new Prisma.Decimal(0),
+        availableBalance: new Prisma.Decimal(0),
+      },
+    }),
+  );
 
   const campaign = await loadCampaignUi(campaignId);
   return {
     campaign,
     chain: {
-      pendingProgramConfirmation: true,
-      closeTx: _closeTxSignature ?? stubTxSignature("close"),
+      pendingProgramConfirmation: false,
+      closeTx: closeTxSignature,
     },
   };
 }

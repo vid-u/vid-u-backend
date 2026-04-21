@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { AppError, ValidationError } from "../utils/errors.js";
+import { AppError, ConflictError, ValidationError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 
 export function errorHandler(
@@ -12,7 +12,8 @@ export function errorHandler(
     res.status(err.statusCode).json({
       success: false,
       message: err.message,
-      ...(err instanceof ValidationError && err.errors !== undefined
+      ...((err instanceof ValidationError || err instanceof ConflictError) &&
+      err.errors !== undefined
         ? { errors: err.errors }
         : {}),
     });

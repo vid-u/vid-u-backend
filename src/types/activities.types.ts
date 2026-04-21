@@ -9,6 +9,7 @@ export type CampaignActivityQueryRow = {
   campaign_title: string;
   user_id: string;
   display_name: string | null;
+  wallet_address: string;
   avatar_url: string | null;
   submission_title: string | null;
   submission_kind: string | null;
