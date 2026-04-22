@@ -166,9 +166,14 @@ export const clientSubmissionParams = z.object({
   submissionId: uuidString,
 });
 
-export const patchSubmissionBody = z.object({
-  severity: z.enum(["critical", "high", "medium", "mild"]).optional(),
-});
+export const patchSubmissionBody = z
+  .object({
+    severity: z.enum(["critical", "high", "medium", "mild"]).optional(),
+    grossUsdc: z.union([z.number(), z.string()]).optional(),
+  })
+  .refine((b) => b.severity != null || b.grossUsdc != null, {
+    message: "Provide severity and/or grossUsdc",
+  });
 
 export const commentBody = z.object({
   body: z.string().min(1).max(10000),

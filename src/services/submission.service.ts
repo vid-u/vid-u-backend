@@ -87,6 +87,30 @@ function midpointForSeverity(
   return a.plus(b).dividedBy(2);
 }
 
+/** Min/max USDC for a severity tier (matches client triage schema / campaign `severity_rewards`). */
+function tierBoundsForSeverity(
+  severity: SubmissionSeverity,
+  rewards: Prisma.JsonValue | null,
+): { min: Prisma.Decimal; max: Prisma.Decimal } {
+  const loose: Record<SubmissionSeverity, { min: string; max: string }> = {
+    critical: { min: "1", max: "10000" },
+    high: { min: "1", max: "5000" },
+    medium: { min: "1", max: "1000" },
+    mild: { min: "1", max: "100" },
+  };
+  if (!rewards || typeof rewards !== "object" || Array.isArray(rewards)) {
+    const b = loose[severity];
+    return { min: toDecimal(b.min), max: toDecimal(b.max) };
+  }
+  const r = rewards as SeverityRewards;
+  const tier = r[severity];
+  if (!tier) {
+    const b = loose[severity];
+    return { min: toDecimal(b.min), max: toDecimal(b.max) };
+  }
+  return { min: toDecimal(tier.min), max: toDecimal(tier.max) };
+}
+
 /** Human-readable line for search / legacy clients when `devices` + `browser` are set. */
 function buildDeviceInfo(input: {
   devices: string[];
@@ -1011,12 +1035,25 @@ export async function getSubmissionForUser(
   };
 }
 
-export async function patchSubmissionSeverity(
+export type PatchClientSubmissionPayoutInput = {
+  severity?: SubmissionSeverity;
+  grossUsdc?: number | string;
+};
+
+/**
+ * Update pending submission's severity and/or reallocate the escrow lock to a USDC amount
+ * (on-chain reallocate + DB) before client approval. Validates `grossUsdc` against the
+ * min/max for the target severity (submission severity or the provided `severity`).
+ */
+export async function patchClientSubmissionPayout(
   submissionId: string,
   clientId: string,
-  severity?: SubmissionSeverity,
+  input: PatchClientSubmissionPayoutInput,
 ) {
-  if (!severity) throw new ValidationError("severity required");
+  if (input.severity == null && input.grossUsdc == null) {
+    throw new ValidationError("Provide severity and/or grossUsdc");
+  }
+
   const s = await prisma.submission.findUnique({
     where: { id: submissionId },
     include: { campaign: true },
@@ -1024,8 +1061,27 @@ export async function patchSubmissionSeverity(
   if (!s) throw new NotFoundError("Submission not found");
   if (s.campaign.clientId !== clientId) throw new ForbiddenError();
 
-  const newAlloc = midpointForSeverity(severity, s.campaign.severityRewards);
+  const targetSeverity = (input.severity ?? s.severity) as SubmissionSeverity;
+
+  let newAlloc: Prisma.Decimal;
+  if (input.grossUsdc != null) {
+    newAlloc = toDecimal(input.grossUsdc);
+    const { min, max } = tierBoundsForSeverity(targetSeverity, s.campaign.severityRewards);
+    if (newAlloc.lt(min) || newAlloc.gt(max)) {
+      throw new ValidationError(
+        `Bounty must be between ${min.toString()} and ${max.toString()} USDC for ${targetSeverity}`,
+      );
+    }
+  } else {
+    if (!input.severity) {
+      throw new ValidationError("severity is required when grossUsdc is omitted");
+    }
+    newAlloc = midpointForSeverity(input.severity, s.campaign.severityRewards);
+  }
+
+  const nextSeverity = (input.severity ?? s.severity) as SubmissionSeverity;
   const delta = newAlloc.minus(s.allocatedAmount);
+  const severityChanged = input.severity != null && input.severity !== s.severity;
 
   if (!delta.equals(0) && s.campaign.escrowPda?.trim() && !solanaBackendConfigured()) {
     throw new ValidationError(
@@ -1059,7 +1115,7 @@ export async function patchSubmissionSeverity(
     await tx.submission.update({
       where: { id: submissionId },
       data: {
-        severity,
+        severity: nextSeverity,
         ...(!delta.equals(0) ? { allocatedAmount: newAlloc } : {}),
         ...(moveToTriaged ? { status: SubmissionStatus.triaged } : {}),
       },
@@ -1076,21 +1132,38 @@ export async function patchSubmissionSeverity(
       });
     }
 
-    await tx.submissionLog.create({
-      data: {
-        submissionId,
-        actorId: clientId,
-        eventType: "severity_changed",
-        metadata: submissionLogMetadata(
-          {
-            severity,
-            previousAllocated: s.allocatedAmount.toString(),
-            newAllocated: newAlloc.toString(),
-          },
-          reallocateTx ? { reallocate: reallocateTx } : {},
-        ),
-      },
-    });
+    if (severityChanged) {
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: clientId,
+          eventType: "severity_changed",
+          metadata: submissionLogMetadata(
+            {
+              severity: nextSeverity,
+              previousAllocated: s.allocatedAmount.toString(),
+              newAllocated: newAlloc.toString(),
+            },
+            reallocateTx ? { reallocate: reallocateTx } : {},
+          ),
+        },
+      });
+    } else if (!delta.equals(0)) {
+      await tx.submissionLog.create({
+        data: {
+          submissionId,
+          actorId: clientId,
+          eventType: "bounty_reallocated",
+          metadata: submissionLogMetadata(
+            {
+              previousAllocated: s.allocatedAmount.toString(),
+              newAllocated: newAlloc.toString(),
+            },
+            reallocateTx ? { reallocate: reallocateTx } : {},
+          ),
+        },
+      });
+    }
   });
 
   const full = await prisma.submission.findUniqueOrThrow({
@@ -1101,6 +1174,15 @@ export async function patchSubmissionSeverity(
     },
   });
   return formatSubmissionForApi(full);
+}
+
+export async function patchSubmissionSeverity(
+  submissionId: string,
+  clientId: string,
+  severity?: SubmissionSeverity,
+) {
+  if (!severity) throw new ValidationError("severity required");
+  return patchClientSubmissionPayout(submissionId, clientId, { severity });
 }
 
 export async function addComment(

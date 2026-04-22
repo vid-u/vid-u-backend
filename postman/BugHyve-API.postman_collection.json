@@ -1489,7 +1489,7 @@
               ]
             },
             {
-              "name": "PATCH .../submissions/:submissionId/update (severity)",
+              "name": "PATCH .../submissions/:submissionId/update (severity / grossUsdc)",
               "request": {
                 "method": "PATCH",
                 "header": [
@@ -1512,7 +1512,7 @@
                   }
                 },
                 "url": "{{baseUrl}}/client/submissions/{{submissionId}}/update",
-                "description": "Response **`submission`** uses **`formatSubmissionForApi`** (list-style payload: campaign title strings, `lastUpdated`, resources as **`attachmentUrls`** / **`videoLink`** / **`links`**, no `comments`/`activities` on this endpoint)."
+                "description": "Body: `severity` and/or `grossUsdc` (at least one). `grossUsdc` reallocates the escrow lock to that USDC within the min–max for the target severity (use with `severity` when changing tier before approve). Response **`submission`** uses **`formatSubmissionForApi`** (list-style payload: campaign title strings, `lastUpdated`, resources as **`attachmentUrls`** / **`videoLink`** / **`links`**, no `comments`/`activities` on this endpoint)."
               },
               "response": [
                 {

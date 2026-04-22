@@ -85,11 +85,10 @@ export async function patchSubmission(req: Request, res: Response): Promise<void
     return;
   }
   const submissionId = submissionIdFromReq(req);
-  const row = await submissionService.patchSubmissionSeverity(
-    submissionId,
-    req.dbUser!.id,
-    req.body.severity,
-  );
+  const row = await submissionService.patchClientSubmissionPayout(submissionId, req.dbUser!.id, {
+    severity: req.body.severity,
+    grossUsdc: req.body.grossUsdc,
+  });
   sendSuccess(res, row, "updated");
 }
 
