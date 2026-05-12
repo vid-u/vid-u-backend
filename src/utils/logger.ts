@@ -11,6 +11,6 @@ export const logger = winston.createLogger({
       return `${String(timestamp)} [${level}] ${stack ?? message}${rest}`;
     })
   ),
-  defaultMeta: { service: "bughyve-backend-solana" },
+  defaultMeta: { service: "vidu-landing-page-backend" },
   transports: [new winston.transports.Console()],
 });

@@ -1,8 +1,8 @@
 {
-  "name": "bughyve-backend-solana",
+  "name": "vidu-landing-page-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "BugHyve MVP API — (Solana Frontier 2026)",
+  "description": "Minimal API for the VidU marketing site — waitlist signups only",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
@@ -20,17 +20,8 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.782.0",
-    "@aws-sdk/s3-request-presigner": "^3.782.0",
-    "@coral-xyz/anchor": "^0.31.1",
     "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",
-    "@solana/kit": "^5.5.1",
-    "@solana/web3-compat": "^0.0.21",
-    "@solana/web3.js": "^1.98.4",
-    "@supabase/supabase-js": "^2.103.0",
-    "bn.js": "^5.2.2",
-    "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -38,13 +29,11 @@
     "helmet": "^8.0.0",
     "pg": "^8.13.1",
     "prisma": "^7.0.0",
-    "resend": "^4.8.0",
     "winston": "^3.17.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
-    "@types/bn.js": "^5.1.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.0",

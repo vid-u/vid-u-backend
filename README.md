@@ -1,80 +1,39 @@
-# BugHyve API (Solana MVP)
+# VidU landing page backend
 
-Backend service for **BugHyve** — a human QA marketplace where clients fund bug-bounty-style campaigns on Solana and testers submit findings for review and payout.
+Minimal **Express + Prisma (Postgres)** API for the **VidU** marketing site (the `clipper-landing-page` app in this repo) — **waitlist only**.
 
-This repo is the **Node.js / Express** layer: it owns **business rules**, talks to **Supabase Postgres** (via Prisma), verifies **Supabase Auth** JWTs, can issue **presigned URLs** for **Cloudflare R2** uploads, and coordinates **Solana** work: verifying client-signed transactions (fund, approve, …), signing **backend authority** instructions (`allocate_submission`, `pause_campaign` / `resume_campaign`, optional `reject_submission`), and keeping **Postgres** aligned with on-chain escrow after RPC confirmation.
+## Endpoints
 
-## How this fits the monorepo
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health`, `/` | Liveness |
+| `GET` | `/health/ready` | DB check |
+| `GET` | `/waitlist` | JSON counts `{ brand, creator }` (optional for dashboards) |
+| `POST` | `/waitlist` | Body `{ "email": string, "role": "brand" \| "creator", "notes?": string }` |
 
-| Piece                                                    | Role                                                                                                                                                                                                      |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[`bughyve-web-solana`](../bughyve-web-solana/)**       | React (Vite) app. Point its API base URL at this server (e.g. `http://localhost:3001` in dev). Users sign in with a wallet + Supabase session, then call protected routes with `Authorization: Bearer …`. |
-| **This API**                                             | Source of truth for app data in Postgres; campaign lifecycle, submissions, escrow-backed balances, and payout rows aligned with the Anchor program.                                                      |
-| **[`bughyve-escrow-solana`](../bughyve-escrow-solana/)** | Anchor program — campaign PDAs, USDC escrow, payouts. The app and API align with program accounts and instructions described in the architecture doc.                                                     |
+CORS allows `FRONTEND_URL` (comma-separated origins) and `http://localhost:*`.
 
-Design details, schema, and flows: **[MVP architecture & spec](../bughyve-mvp-architecture-solana/bughyve-mvp-architecture.md)**.
+## Environment
 
-## Prerequisites
+See `.env.example`. Required:
 
-- **Node.js 20.19+**
-- A **[Supabase](https://supabase.com)** project (Postgres + Auth) — or use Docker Compose below for Postgres only while still using Supabase for Auth.
-
-## Documentation
-
-- **[Supabase setup](./docs/supabase-setup.md)** — database URL, keys, auth sync
-- **[Cloudflare R2](./docs/cloudflare-r2.md)** — optional file uploads
-- **[Deployment](./docs/deployment.md)** — production build, env, Railway notes
-- **[Campaign funding sync](./docs/campaign-funding-sync.md)** — `GET`/`POST` `/client/campaigns/:id/sync-fund` when Solana funded but `/fund` API failed
-
-See **[`docs/README.md`](./docs/README.md)** for the full index.
-
-## Run locally (Supabase Postgres)
-
-1. **Environment**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Fill **`DATABASE_URL`**, **`SUPABASE_URL`**, and **`SUPABASE_SERVICE_ROLE_KEY`** from your Supabase project. URL-encode special characters in the DB password.
-
-2. **Install & Prisma**
-
-   ```bash
-   npm install
-   npx prisma generate
-   ```
-
-3. **Migrations**
-
-   ```bash
-   npx prisma migrate dev
-   ```
-
-   (Use `npx prisma migrate deploy` if you already have an up-to-date schema and only need to apply pending migrations.)
-
-4. **Start**
-
-   ```bash
-   npm run dev
-   ```
-
-   Default: **http://localhost:3001** — try `GET /health` and `GET /` for a quick route list.
-
-## Run locally (Docker Compose)
-
-Optional: **Postgres in Docker** plus the API in a container (see [`docker-compose.yml`](./docker-compose.yml)). Copy `.env.example` → `.env` with Supabase keys; Compose overrides `DATABASE_URL` to use the bundled Postgres. Run:
-
-```bash
-docker compose up -d
-```
+- `DATABASE_URL`
+- Optional: `FRONTEND_URL` (CORS)
 
 ## Scripts
 
-| Command                   | Purpose                                                                    |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `npm run dev`             | Dev server with reload (`tsx watch`)                                       |
-| `npm run build`           | Compile to `dist/`                                                         |
-| `npm start`               | `prisma migrate deploy` then run compiled app (production / Railway default) |
-| `npm run prisma:migrate`  | `prisma migrate dev`                                                       |
-| `npm run prisma:generate` | Regenerate Prisma Client after schema changes                              |
+```bash
+npm install
+cp .env.example .env   # edit DATABASE_URL
+npm run prisma:migrate  # creates waitlist table
+npm run prisma:generate
+npm run dev
+```
+
+Docker: `docker compose up` (or `docker-compose up` if your CLI only has the older hyphenated command).
+
+## Frontend wiring
+
+Point `HeroVidUSection` `onWaitlistSubmit` / env `VITE_WAITLIST_URL` at `POST http://localhost:3001/waitlist` with JSON `{ email, role: "creator" | "brand" }` (match landing copy).
+
+**Database:** use a dedicated Postgres instance; the migration creates only the `waitlist` table.

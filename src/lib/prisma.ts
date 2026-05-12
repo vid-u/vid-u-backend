@@ -1,14 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { type Prisma, PrismaClient } from "../generated/prisma/client.js";
+import { PrismaClient } from "../generated/prisma/client.js";
 import { env } from "./env.js";
-
-type Decimalish = Prisma.Decimal | { toString(): string };
-
-/** Prisma `Decimal` (and similar) → string for JSON. */
-export function dec(d: Decimalish | null | undefined): string | null {
-  if (d == null) return null;
-  return d.toString();
-}
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
 

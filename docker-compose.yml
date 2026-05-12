@@ -1,11 +1,8 @@
-# Backend uses an anonymous volume for node_modules so Linux deps stay inside the container.
-# After adding npm packages on the host, refresh the volume once, e.g.:
-#   docker compose exec backend npm install
-# or remove the anonymous volume (docker compose down && docker volume prune) then up again.
+# Anonymous volume keeps Linux node_modules inside the container.
 services:
   backend:
     image: node:22
-    container_name: bughyve-backend
+    container_name: vidu-landing-backend
     restart: unless-stopped
     working_dir: /app
     depends_on:
@@ -16,33 +13,32 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3001
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bughyve?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/vidu_waitlist?schema=public
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3001:3001"
     volumes:
       - .:/app
       - /app/node_modules
-    # Fresh volumes have an empty DB; migrate deploy creates tables (same as production `npm start`).
     command: sh -c "npm install && npm run dev:docker"
 
   postgres:
     image: postgres:16
-    container_name: bughyve-postgres
+    container_name: vidu-landing-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: bughyve
+      POSTGRES_DB: vidu_waitlist
     ports:
       - "5434:5432"
     volumes:
-      - bughyve_pgdata:/var/lib/postgresql/data
+      - vidu_landing_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d bughyve"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vidu_waitlist"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  bughyve_pgdata:
+  vidu_landing_pgdata:

@@ -1,20 +1,19 @@
 import { prisma } from "../lib/prisma.js";
 import type { WaitlistDto } from "../validation/waitlist.schema.js";
 
-/** Public aggregate counts by intended role (landing page / marketing). */
 export async function getWaitlistCounts(): Promise<{
-  tester: number;
-  client: number;
+  brand: number;
+  creator: number;
 }> {
   const groups = await prisma.waitlist.groupBy({
     by: ["role"],
     _count: { _all: true },
   });
-  const out = { tester: 0, client: 0 };
+  const out = { brand: 0, creator: 0 };
   for (const g of groups) {
     const n = g._count._all;
-    if (g.role === "tester") out.tester = n;
-    if (g.role === "client") out.client = n;
+    if (g.role === "brand") out.brand = n;
+    if (g.role === "creator") out.creator = n;
   }
   return out;
 }
@@ -25,9 +24,7 @@ export type WaitlistSignupResult = {
   createdAt: Date;
 };
 
-export async function addToWaitlist(
-  input: WaitlistDto,
-): Promise<WaitlistSignupResult> {
+export async function addToWaitlist(input: WaitlistDto): Promise<WaitlistSignupResult> {
   const email = input.email.toLowerCase();
 
   const existing = await prisma.waitlist.findUnique({ where: { email } });
