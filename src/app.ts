@@ -9,6 +9,36 @@ import { notFoundHandler } from "./middleware/notFound.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { apiRouter } from "./routes/api.routes.js";
 
+/**
+ * Allow both apex and www variants for each configured HTTPS/HTTP origin so
+ * marketing traffic at `www.` still passes CORS when only the naked domain is listed (or vice versa).
+ */
+function expandAllowedOrigins(configured: string[]): string[] {
+  const out = new Set<string>();
+  for (const o of configured) {
+    out.add(o);
+    try {
+      const u = new URL(o);
+      if (u.hostname === "localhost" || u.hostname.endsWith(".localhost")) {
+        continue;
+      }
+      // Skip numeric IPs — www. expansion does not apply.
+      if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(u.hostname)) {
+        continue;
+      }
+      const port = u.port ? `:${u.port}` : "";
+      if (u.hostname.startsWith("www.")) {
+        out.add(`${u.protocol}//${u.hostname.slice(4)}${port}`);
+      } else {
+        out.add(`${u.protocol}//www.${u.hostname}${port}`);
+      }
+    } catch {
+      /* malformed URL — keep literal entry only */
+    }
+  }
+  return [...out];
+}
+
 export function createApp(): express.Application {
   const app = express();
   app.set("trust proxy", 1);
@@ -21,10 +51,12 @@ export function createApp(): express.Application {
           callback(null, true);
           return;
         }
-        const configured = (env.FRONTEND_URL ?? "http://localhost:5173")
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
+        const configured = expandAllowedOrigins(
+          (env.FRONTEND_URL ?? "http://localhost:5173")
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean),
+        );
         if (configured.includes(origin)) {
           callback(null, true);
           return;
