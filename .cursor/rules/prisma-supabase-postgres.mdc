@@ -1,0 +1,37 @@
+---
+description: Prisma 7 + adapter-pg, Supabase pooler, schema indexes, list pagination patterns
+globs:
+  - prisma/**/*.prisma
+  - src/lib/prisma.ts
+  - src/utils/api-response.ts
+alwaysApply: false
+---
+
+# Prisma and Supabase Postgres
+
+## Client setup
+
+- **`src/lib/prisma.ts`:** **`PrismaClient`** with **`@prisma/adapter-pg`** and **`PrismaPg(env.DATABASE_URL)`**; singleton via **`globalThis`** in non-production for hot reload.
+- **`disconnectPrisma()`** runs on shutdown (**`src/index.ts`** SIGTERM/SIGINT)—preserve this pattern when adding workers.
+
+## Connection strings
+
+- Point **`DATABASE_URL`** at Supabase’s **pooled** connection host/port when deploying multiple Railway replicas so total connections stay within Supabase limits; shrink Prisma pool settings per instance as replicas increase.
+
+## Schema
+
+- Generator outputs to **`src/generated/prisma`** (`schema.prisma` **`generator`** block).
+- Add **`@@index`** / **`@unique`** for foreign keys, frequent filters, and sort columns; composite indexes follow **equality-first** column order matching Prisma `where` usage.
+
+## Migrations
+
+- Ship schema changes with **`prisma migrate`**; prefer **additive-first** migrations on live tables to reduce lock risk.
+
+## List endpoints
+
+- Avoid unbounded **`findMany`** for user-facing lists—use **`take` / `skip`** or cursor pagination.
+- Reuse **`buildPaginationMeta`**, **`pageToOffset`**, **`sendSuccess`** from **`src/utils/api-response.ts`** where page/limit JSON matches existing APIs.
+
+## Query cost
+
+- Prefer narrow **`select`**/`include` graphs to avoid over-fetching and accidental data leakage (**`security-auth-prisma.mdc`** complements this).

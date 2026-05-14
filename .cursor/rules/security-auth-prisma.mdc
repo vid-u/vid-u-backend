@@ -1,0 +1,53 @@
+---
+description: Auth (Supabase JWT), Zod validation middleware, Prisma-safe writes, webhooks crypto, R2/SSRF
+globs:
+  - src/**/*.ts
+alwaysApply: false
+---
+
+# Security, auth, and data access
+
+Prerequisite: **`trust-boundary-stack.mdc`**.
+
+## Authentication
+
+- **Supabase Auth** issues JWTs consumed by this API. When adding protected routes, verify JWT (**issuer, audience, signature, `exp`**) using Supabase’s JWKS or documented verification—never treat raw client JSON as proof of identity.
+
+## Authorization
+
+- After auth, enforce **Brand vs Creator** and **resource ownership** (e.g. brand’s campaign, creator’s submission) per product access docs—centralize helpers/middleware so new routes cannot skip checks.
+
+## Request validation (Zod)
+
+- Define schemas under **`src/validation/*.schema.ts`** (or equivalent) and wire them with **`validateBody`**, **`validateParams`**, **`validateQuery`** from **`src/middleware/validate.ts`** (`zod` **`parseAsync`**; **`ZodError`** → **`ValidationError`** + **`formatFlattenedZodError`**).
+- Use **`.strict()`** or **`.strip()`** intentionally when you need to reject unknown fields.
+
+## Prisma and SQL injection
+
+- Prefer **`prisma.*`** CRUD with typed `where`/`data`.
+- For raw SQL use **`Prisma.sql`** tagged templates with bound parameters—or documented safe equivalents—never string-concatenate user input into queries.
+
+## Mass assignment
+
+- Never spread **`req.body`** into **`prisma.*.create` / `update`**. Pass **explicit** scalar fields that handlers map from validated input.
+
+## Webhooks (integrity)
+
+- **Verify provider signatures** (e.g. **Xendit**) on the exact raw payload before business logic; use constant-time comparison where APIs expose raw secrets.
+- Handlers must tolerate **duplicate delivery**—implement **idempotency** once in **`reliability-workers-deps.mdc`** (unique event IDs, ledger guards).
+
+## OAuth vendor tokens (TikTok / Meta)
+
+- Store **encrypted** access/refresh tokens at rest; never log them or return them to the SPA.
+
+## Cloudflare R2
+
+- Issue **short-TTL presigned URLs** with least-privilege key prefixes; avoid streaming large uploads through Express when the product can upload **direct to R2**.
+
+## SSRF
+
+- **Submit-time URL fetching:** validate scheme/host, block internal/metadata ranges, enforce timeouts and response size limits—user-supplied URLs must not reach private networks.
+
+## Logging hygiene
+
+- Do not log secrets, webhook signing inputs, or **`Authorization`** headers. Redaction and Winston patterns: **`observability-winston-errors.mdc`**.

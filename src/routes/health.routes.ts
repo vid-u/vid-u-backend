@@ -1,27 +1,9 @@
-import { Router, type Request, type Response } from "express";
-import { prisma } from "../lib/prisma.js";
-import { sendSuccess } from "../utils/api-response.js";
+import { Router } from "express";
+import * as healthController from "../controllers/health.controller.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const healthRouter = Router();
 
-function sendLiveness(_req: Request, res: Response) {
-  sendSuccess(
-    res,
-    {
-      status: "ok",
-      timestamp: new Date().toISOString(),
-    },
-    "Server is healthy",
-  );
-}
+healthRouter.get(["/", "/health"], healthController.getLiveness);
 
-healthRouter.get(["/", "/health"], sendLiveness);
-
-healthRouter.get("/health/ready", async (_req, res, next) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    sendSuccess(res, { database: "up" }, "Ready");
-  } catch (e) {
-    next(e);
-  }
-});
+healthRouter.get("/health/ready", asyncHandler(healthController.getReady));

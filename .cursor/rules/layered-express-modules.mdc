@@ -1,0 +1,86 @@
+---
+alwaysApply: false
+---
+
+# Layered modules (routes → controllers → services)
+
+Use this layout as the **default** for new HTTP surface area. It matches the proven pattern from prior Express backends (thin HTTP layer, Zod at the edge, services own business rules). Stack-specific concerns stay in **`express-http-app.mdc`**, **`security-auth-prisma.mdc`**, and related rules—this file is **structure and responsibility boundaries** only.
+
+## Directory map
+
+| Area          | Path                                                 | Responsibility                                                                  |
+| ------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| App bootstrap | `src/app.ts`, `src/index.ts`                         | `createApp()`, global middleware, mount routers, `errorHandler` last            |
+| Routes        | `src/routes/**/*.routes.ts`                          | `Router()`, method + path, **middleware chain only**—no business logic          |
+| Controllers   | `src/controllers/*.controller.ts`                    | Auth/context checks, call services, **`sendSuccess`** / throw **`AppError`**    |
+| Services      | `src/services/*.service.ts`                          | Domain logic, Prisma/vendor I/O, throw typed errors                             |
+| Validation    | `src/validation/*.schema.ts` + `validation/index.ts` | Zod schemas, **export `z.infer` DTO types**                                     |
+| Types         | `src/types/*.types.ts`                               | Service inputs/outputs that **extend** DTOs with server context (e.g. `userId`) |
+| Middleware    | `src/middleware/*.ts`                                | Cross-cutting: auth, `validateBody`/`Params`/`Query`, roles                     |
+| Utils         | `src/utils/*.ts`                                     | **`asyncHandler`**, **`api-response`**, **`errors`**, formatting helpers        |
+| Lib           | `src/lib/*.ts`                                       | Singleton clients (`prisma`, `env`), no route-specific rules                    |
+
+When a domain grows large, **nested route folders** (e.g. `routes/client/`, `routes/admin/`) stay under `routes/`; keep **one router file per concern** and compose in **`api.routes.ts`** (or equivalent root router).
+
+## Routes
+
+- Export a **`Router`**: `export const fooRouter = Router()`.
+- Register handlers as **`METHOD(path, ...middlewares, asyncHandler(controllerFn))`**.
+- **Order matters:** authentication and authorization **before** validation **before** the controller (when the body is not needed for auth).
+- **Never** put Prisma calls, multi-step workflows, or non-trivial branching in route files—delegate to a controller or service.
+- Prefer **`import * as controller`** from `../controllers/foo.controller.js` and **`asyncHandler(controller.method)`** so every async handler forwards rejections to **`errorHandler`**.
+- Group related paths on the same router; mount sub-routers from a single **`apiRouter`** so prefixes stay obvious.
+
+## Controllers
+
+- One **exported async function per HTTP handler**, name aligned with verb + resource (e.g. `getMe`, `patchMe`, `postSync`).
+- Signature: **`(req: Request, res: Response): Promise<void>`**—do not return JSON ad hoc; use **`sendSuccess`** from **`src/utils/api-response.ts`** for success envelopes.
+- **Thin layer:** read `req.authUser`, `req.params`, `req.query`, `req.body` (already validated where `validate*` ran); map to service **input types**; await service; respond.
+- **Throw** **`UnauthorizedError`**, **`ForbiddenError`**, **`NotFoundError`**, **`ConflictError`**, **`ValidationError`** (or subclasses of **`AppError`**) instead of calling `res.status` directly for expected failures—keeps **`errorHandler`** the single place for error JSON shape.
+- After **`validateBody`**, treat **`req.body`** as the parsed DTO; for TypeScript, import the **DTO type** from the schema file or use a typed cast consistent with the schema.
+- Do **not** import Prisma in controllers unless the team explicitly allows a trivial read—default is **services own all DB access**.
+
+## Services
+
+- **Named exports**, **`async function`** per use case (or small cohesive group). Avoid default exports for services.
+- Accept **plain input objects** typed in **`src/types/*.types.ts`** (e.g. `SyncUserInput = SyncBodyDto & { authUserId: string }`) so callers cannot forget context fields.
+- **Throw domain errors** (`ConflictError`, `NotFoundError`, …) for business outcomes; reserve bare **`Error`** for truly unexpected bugs (they become 500s).
+- **No `Request` / `Response`** types in services—keeps them testable and reusable from jobs/scripts later.
+- **Compose** other services for cross-cutting workflows; extract shared private helpers in the same file or `lib/` when reused across services.
+- **Mass assignment:** never spread raw client objects into **`prisma.*.create` / `update`**—set **explicit fields** mapped from validated input (see **`security-auth-prisma.mdc`**).
+
+## Validation and types
+
+- **One schema file per domain** (or per aggregate): `src/validation/foo.schema.ts`.
+- Export **Zod schemas** and **`z.infer<typeof schema>`** types with a **`Dto`** suffix (e.g. `PatchUserBodyDto`).
+- Use **`.strict()`** on JSON bodies when unknown fields must be rejected; use **`.strip()`** only when silent dropping is intentional.
+- Re-export commonly used schemas from **`src/validation/index.ts`** so route files avoid deep import trees.
+- **`src/types/*.types.ts`:** define **service-layer shapes**—inputs that add auth/session/context to a DTO, result types for non-trivial returns, and enums/views that are not worth inferring from Zod. **Prefer inferring from Zod** for anything that is purely “the HTTP body/query/params shape.”
+
+## Standard response and errors
+
+- Success: **`sendSuccess(res, data, message?, status?, meta?)`** — keep **`{ success: true, message, data, meta? }`** consistent for JSON APIs.
+- List endpoints: use **`buildPaginationMeta`** + **`pageToOffset`** when returning paginated collections.
+- Operational errors: subclass **`AppError`** in **`src/utils/errors.ts`** with a correct **`statusCode`**; **`errorHandler`** maps them to JSON. **`ValidationError`** / **`ConflictError`** may attach **`errors`** (e.g. Zod flatten) for clients.
+
+## Async and validation middleware
+
+- Wrap every async route handler in **`asyncHandler`** so rejected promises reach **`errorHandler`**.
+- Use **`validateBody`**, **`validateParams`**, **`validateQuery`** from **`src/middleware/validate.ts`** for Zod parsing; details in **`security-auth-prisma.mdc`**.
+
+## Patterns worth adopting beyond a minimal backend
+
+These are **optional** escalations when complexity grows—not required on day one.
+
+- **Feature modules:** when a domain owns many routes/controllers/services, colocate under `src/modules/<feature>/` **only if** the team commits to that structure repo-wide; otherwise stay with the flat-by-layer layout above.
+- **Test seams:** for large services, inject **`PrismaClient`** or repository interfaces via parameters or a small factory to simplify unit tests; avoid DI ceremony for small CRUD handlers.
+- **Idempotency and jobs:** heavy or retry-prone work belongs in workers/queues per **`reliability-workers-deps.mdc`**, not inline in controllers.
+- **OpenAPI / problem details:** if public API consumers multiply, consider documenting shapes with OpenAPI or adopting **RFC 7807** `application/problem+json`—only with a deliberate breaking-response plan; until then keep the existing **`success` / `message` / `data`** contract.
+
+## Checklist for a new endpoint
+
+1. Add or extend **Zod schema** + DTO types in **`src/validation`**.
+2. Add **service function(s)** + **`types`** inputs/outputs if needed.
+3. Add **controller function** using **`sendSuccess`** / throws **`AppError`**.
+4. Wire **route** with correct middleware order: **`authenticate`** (if needed) → **`validate*`** → **`asyncHandler(controller.fn)`**.
+5. Mount router in **`api.routes.ts`** (or parent router) with the right prefix.

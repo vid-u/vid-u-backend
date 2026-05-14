@@ -1,0 +1,36 @@
+---
+description: Winston logging, request logger, Express errorHandler, metrics posture
+globs:
+  - src/**/*.ts
+alwaysApply: false
+---
+
+# Observability: Winston and errors
+
+## Logging (`winston`)
+
+- **`src/utils/logger.ts`:** Winston **`Console`** transport; **`production`** → **`info`**, **`development`** → **`debug`**; **`format.printf`** prints **`timestamp`**, **`level`**, **`stack`/`message`**, remaining **`meta`** as **`JSON.stringify`**—keep **`meta`** as plain serializable objects (no circular structures).
+
+- Extend **`defaultMeta`** with **`requestId`** once middleware assigns it; propagate the same id into worker logs when jobs originate from HTTP.
+
+- **Secrets / PII:** never attach raw bodies, cookies, `Authorization`, or webhook secrets to `meta`. Prefer stable identifiers (`userId`, `campaignId`, `jobId`).
+
+## Request logging
+
+- **`src/middleware/requestLogger.ts`:** logs **`method`**, **`path`**, **`status`**, **`ms`** on **`finish`**—keep this lightweight; avoid logging query strings that contain tokens.
+
+## Errors (`AppError` hierarchy)
+
+- Domain failures throw **`AppError`** subclasses from **`src/utils/errors.ts`** (`ValidationError` → **400** with **`errors`**, **`UnauthorizedError`**, **`ForbiddenError`**, **`NotFoundError`**, **`ConflictError`** → **409** with optional **`errors`**).
+
+- **`src/middleware/errorHandler.ts`:** returns **`{ success: false, message, errors? }`** for **`AppError`**; **`500`** returns generic **`message`** in **`production`**, detailed message only outside production—preserve this behavior when extending.
+
+- **`logger.error`** on unexpected exceptions includes **`stack`** server-side only—never return stacks to clients.
+
+## Helpers
+
+- Prefer **`sendSuccess` / `sendError`** from **`src/utils/api-response.ts`** for handlers that respond manually; keep shapes aligned with **`errorHandler`** (`success` flag).
+
+## Metrics and tracing (future)
+
+- When adding APM or OpenTelemetry, instrument Express routers and workers with **RED** signals (rate, errors, duration) plus queue depth and Prisma pool saturation—hook into the same **`requestId`**/`traceId`.

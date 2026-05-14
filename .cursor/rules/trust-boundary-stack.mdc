@@ -1,0 +1,32 @@
+---
+description: VidU API trust boundary — Supabase Auth + Postgres, Express, Prisma, R2, Xendit, TikTok/Meta
+alwaysApply: true
+---
+
+# VidU stack and trust boundary
+
+Canonical product detail: `vidu-webapp/docs/05-tech-stack.md`.
+
+## Runtime
+
+- **Node.js** (≥ 20.19), **Express 4**, **TypeScript**, **ESM** (`"type": "module"`).
+- **Persistence:** **Supabase-hosted PostgreSQL** via **Prisma 7** (`DATABASE_URL`). Migrations and runtime access run from **this API**, not from the SPA.
+
+## What the SPA uses Supabase for
+
+- **Supabase Auth** only for identity/session/JWT. The SPA does **not** read or write app tables (campaigns, submissions, ledgers, payouts, etc.) through Supabase client or PostgREST.
+
+## What this API enforces
+
+- **Express is the boundary** for app data: verify JWT (Supabase-issued), enforce **Brand vs Creator** and resource ownership on every protected route.
+- **Do not rely on Row Level Security** as the primary authorization mechanism for product routes; optional RLS is defense-in-depth only.
+
+## Integrations (planned or in product scope)
+
+- **Cloudflare R2:** private objects; **presigned URLs** issued only from this API (metadata rules live with upload/download routes).
+- **Xendit:** inbound **signed webhooks**; payout/settlement logic must be **idempotent** (see `reliability-workers-deps.mdc`).
+- **TikTok / Meta:** OAuth tokens stored **encrypted**, never sent to the SPA; submit-time fetch and **liveness** jobs may call vendor APIs—rate limits and backoff belong in workers/async paths when latency or volume grows.
+
+## Secrets
+
+- Database URL, Supabase **service** credentials, webhook signing secrets, vendor keys: **environment variables on the server only**, never in Vite or browser bundles.

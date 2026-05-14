@@ -1,0 +1,44 @@
+---
+description: Idempotency, async workers, queues, vendor resilience — Xendit, TikTok/Meta, liveness jobs
+globs:
+  - src/**/*.ts
+alwaysApply: false
+---
+
+# Reliability: jobs, idempotency, and outbound dependencies
+
+## Idempotency (API + webhooks + workers)
+
+- Any **POST/PATCH** that browsers, **workers**, or **webhooks** may retry must be safe to replay.
+- Support **`Idempotency-Key`** where appropriate: persist **`(scope, key) → outcome`** (TTL or permanent row) and return the same HTTP/business result on replay.
+- Use **natural keys** in Postgres: **`UNIQUE`** on provider event IDs, **`(campaign_id, canonical_post_id)`**, etc., so duplicates surface as conflicts instead of extra rows.
+- **Money movement (Xendit / payouts):** never double-credit—enforce uniqueness (`batch_id` + line key) or a strict state machine (**`pending` → `posted`** once only).
+
+## When work leaves the Express request
+
+Move async when **any** apply:
+
+- Vendor calls often exceed **~2–3 s**, are **rate-limited**, or flaky (**TikTok**, **Meta**, payments).
+- Batch work scales with **N** rows (**daily liveness** checks across submissions).
+- Retries need **backoff** without holding HTTP connections open.
+
+Return **`202 Accepted`** with a **`jobId`** or a resource in **`processing`** when the product UX allows; persist minimal identifiers on the job row and reload authoritative state from Prisma in the worker.
+
+## Process split
+
+- **`api`:** validate auth, enqueue work, fast reads/writes—no large cron batches in-process.
+- **`worker`:** separate **`npm run`** / Railway service when queues land; bounded concurrency per vendor.
+
+## Queue stack (when introduced)
+
+- Prefer **Redis** + **BullMQ** (or equivalent) with explicit concurrency, visibility timeout, and **dead-letter** inspection—not yet in `package.json`; add deliberately.
+
+## Outbound resilience
+
+- Wrap TikTok/Meta/Xendit HTTP clients with **timeouts** and caps on concurrent calls per instance.
+- Use **circuit breakers** after repeated failures (library or small wrapper)—fail fast while cooling down.
+- Keep **Prisma transactions short**: do not await vendor HTTP inside transactions holding row locks; persist intent (`pending_external_call`) then call vendors.
+
+## Input normalization (non-schema)
+
+- **Trim**, enforce **max lengths**, normalize Unicode for comparisons, strip unsafe control characters in constrained string fields (slugs, handles)—apply **after** Zod where rules exceed pure typing (**`security-auth-prisma.mdc`** owns validation entry).

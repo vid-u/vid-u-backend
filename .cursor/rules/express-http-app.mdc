@@ -1,0 +1,44 @@
+---
+description: Express app wiring — helmet, cors, body limits, express-rate-limit, HTTP semantics
+alwaysApply: false
+---
+
+# Express HTTP application
+
+Implementation reference: **`src/app.ts`** (`createApp`).
+
+## Middleware stack (current)
+
+- **`trust proxy`:** `app.set("trust proxy", 1)` so **`express-rate-limit`** and logs see correct client IPs behind Railway/load balancers.
+- **`helmet()`** for baseline security headers.
+- **`cors`:** allowlist from **`FRONTEND_URL`** (comma-separated); **`expandAllowedOrigins`** adds apex/www pairs; **`credentials: true`**; dev allowance for `http://localhost:<port>`.
+- **Body parsers:** `express.json` and `express.urlencoded` with **`limit: "2mb"`**—adjust only with an explicit reason.
+- **`requestLogger`** before routers (see `observability-winston-errors.mdc`).
+
+## Rate limiting
+
+- Global **`express-rate-limit`** on API traffic: **`windowMs` 15 minutes**, **`max` 300**, **`standardHeaders: true`**, **`legacyHeaders: false`**, **`skip`** for `/`, `/health`, `/health/*`.
+- Add **additional** `rateLimit()` instances for sensitive routers (auth callbacks, password reset, payments init, **webhook receivers**) with tighter `max`/`windowMs`—mount **before** those routes.
+
+## Route mounting
+
+- **`healthRouter`** is mounted **before** the global limiter so health checks are not throttled incorrectly if paths overlap (aligned with current `skip` logic).
+
+## HTTP semantics (JSON API)
+
+- Prefer **GET** for safe reads; assume **mutations may be retried** by mobile or proxies unless proven otherwise.
+- Return **`429`** / **`503`** with **`Retry-After`** when shedding load or dependencies are unavailable; use **`409`** (this codebase uses **`ConflictError`** → 409) for conflicts so clients do not blindly repeat the same write.
+
+## Caching
+
+- For **public** cacheable **GET** responses, set explicit **`Cache-Control`** (and **`ETag`** / **`Last-Modified`** when worthwhile).
+- Never cache **authenticated** JSON as shared CDN unless the cache key includes identity and TTL is deliberate.
+
+## CORS and preflight
+
+- Keep custom headers minimal on hot paths to avoid unnecessary **`OPTIONS`** preflight traffic.
+
+## Vendor webhooks (HTTP mechanics only)
+
+- Mount webhook routes with the **raw body** shape the provider requires (often **`express.raw`** or dedicated router **before** `express.json`) so signature verification sees the exact bytes— signing algorithms live under **`security-auth-prisma.mdc`**.
+- Respond quickly when work is heavy; defer processing per **`reliability-workers-deps.mdc`**.
