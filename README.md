@@ -11,14 +11,14 @@ Minimal **Express + Prisma (Postgres)** API for the **VidU** marketing site (the
 | `GET` | `/waitlist` | JSON counts `{ brand, creator }` (optional for dashboards) |
 | `POST` | `/waitlist` | Body `{ "email": string, "role": "brand" \| "creator", "notes?": string }` |
 
-CORS allows `FRONTEND_URL` (comma-separated origins) and `http://localhost:*`.
+CORS allows `FRONTEND_URL` (**comma-separated** origins; include marketing **and** app in production) and `http://localhost:*`. The **first** origin is used as the OAuth redirect base for TikTok/Meta — usually set it to the SPA (`https://www.app.vid-u.com`), then add `https://www.vid-u.com` so waitlist on the marketing site works.
 
 ## Environment
 
 See `.env.example`. Required:
 
 - `DATABASE_URL`
-- Optional: `FRONTEND_URL` (CORS)
+- Optional: `FRONTEND_URL` (CORS — required whenever browsers call this API from a deployed frontend)
 
 ## Scripts
 

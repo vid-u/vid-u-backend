@@ -6,6 +6,7 @@ import rateLimit from "express-rate-limit";
 import { env } from "./lib/env.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import { logger } from "./utils/logger.js";
 import { notFoundHandler } from "./middleware/notFound.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { apiRouter } from "./routes/api.routes.js";
@@ -67,7 +68,12 @@ export function createApp(): express.Application {
           callback(null, true);
           return;
         }
-        callback(new Error(`CORS blocked for origin: ${origin}`));
+        logger.warn("CORS request denied — add origin to FRONTEND_URL", {
+          origin,
+          hint:
+            "Use comma-separated origins; first entry is the OAuth redirect base (SPA). Include marketing + app, e.g. https://www.app.vid-u.com,https://www.vid-u.com",
+        });
+        callback(null, false);
       },
       credentials: true,
     }),

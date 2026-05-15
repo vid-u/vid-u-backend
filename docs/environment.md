@@ -6,6 +6,17 @@ Copy `vidu-backend/.env.example` to `vidu-backend/.env` and fill values locally.
 
 - `DATABASE_URL`: Postgres connection string used by Prisma. Run migrations from `vidu-backend` with `npm run prisma:migrate:deploy` (or `prisma:migrate` in development).
 
+## CORS (`FRONTEND_URL`)
+
+- **Comma-separated** list of origins the browser may use when calling `api.vid-u.com` (waitlist, public campaigns, authenticated SPA routes).
+- Each entry automatically gains the matching **apex / `www.`** variant (except `localhost`).
+- **First origin must be your primary SPA** (e.g. `https://www.app.vid-u.com`): TikTok/Meta OAuth callbacks redirect users there (`oauth.controller` reads only the first entry).
+- If the marketing site (`https://www.vid-u.com`) POSTs to `/waitlist` but **that origin is not allowlisted**, the browser shows a CORS error and **no `Access-Control-Allow-Origin`** on the preflight response — fix by including both app + marketing in `FRONTEND_URL`.
+
+Example production:
+
+`FRONTEND_URL=https://www.app.vid-u.com,https://www.vid-u.com`
+
 ## Supabase Auth
 
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`: from the Supabase project **Settings → API**. Used for email OTP, Google OAuth token exchange, and (with anon key) public auth endpoints.
