@@ -21,3 +21,275 @@ model Waitlist {
 
   @@map("waitlist")
 }
+
+enum UserRole {
+  creator
+  brand
+
+  @@map("user_role_enum")
+}
+
+enum Platform {
+  tiktok
+  facebook
+
+  @@map("platform_enum")
+}
+
+enum LinkStatus {
+  connected
+  reconnect
+
+  @@map("link_status_enum")
+}
+
+enum PayoutPurpose {
+  creator_payout
+  brand_refund
+
+  @@map("payout_purpose_enum")
+}
+
+enum PaymentMethodKind {
+  e_wallet
+  bank
+
+  @@map("payment_method_kind_enum")
+}
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  ended
+
+  @@map("campaign_status_enum")
+}
+
+enum SubmissionStatus {
+  pending
+  paying
+  paid
+  payout_failed
+  rejected
+
+  @@map("submission_status_enum")
+}
+
+enum PartialReason {
+  pool_exhausted
+  channel_max
+
+  @@map("partial_reason_enum")
+}
+
+enum LedgerType {
+  deposit
+  release_attempt
+  release
+  release_failed
+  refund_available
+  adjustment
+
+  @@map("ledger_type_enum")
+}
+
+enum SessionStatus {
+  pending
+  paid
+  expired
+  failed
+
+  @@map("session_status_enum")
+}
+
+model User {
+  id        String   @id @db.Uuid
+  email     String   @unique @map("email")
+  name      String?  @map("name")
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roleProfiles        UserRoleProfile[]
+  brandProfile        BrandProfile?
+  creatorAccounts     CreatorPlatformAccount[]
+  paymentMethods      PaymentMethod[]
+  brandCampaigns      Campaign[]               @relation("BrandCampaigns")
+  creatorSubmissions  Submission[]             @relation("CreatorSubmissions")
+
+  @@map("user")
+}
+
+model UserRoleProfile {
+  userId                     String  @map("user_id") @db.Uuid
+  role                       UserRole
+  profileOnboardingComplete  Boolean @default(false) @map("profile_onboarding_complete")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@map("user_role_profile")
+}
+
+model BrandProfile {
+  userId          String   @id @map("user_id") @db.Uuid
+  brandName       String   @map("brand_name")
+  website         String?  @map("website")
+  instagram       String?  @map("instagram")
+  facebook        String?  @map("facebook")
+  tiktok          String?  @map("tiktok")
+  logoObjectKey   String?  @map("logo_object_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("brand_profile")
+}
+
+model CreatorPlatformAccount {
+  id                    String      @id @default(uuid()) @db.Uuid
+  userId                String      @map("user_id") @db.Uuid
+  platform              Platform
+  providerUserId        String      @map("provider_user_id")
+  accessTokenEncrypted  String      @map("access_token_encrypted")
+  refreshTokenEncrypted String      @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime    @map("token_expires_at")
+  lastRefreshedAt       DateTime?   @map("last_refreshed_at")
+  lastRefreshError      String?     @map("last_refresh_error")
+  linkStatus            LinkStatus  @default(connected) @map("link_status")
+  displayHandle         String      @map("display_handle")
+  connectedAt           DateTime?   @map("connected_at")
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform], map: "creator_platform_account_user_platform_key")
+  @@map("creator_platform_account")
+}
+
+model PaymentMethod {
+  id                      String            @id @default(uuid()) @db.Uuid
+  userId                  String            @map("user_id") @db.Uuid
+  purpose                 PayoutPurpose
+  kind                    PaymentMethodKind
+  xenditChannelCode       String            @map("xendit_channel_code")
+  label                   String
+  bankName                String?           @map("bank_name")
+  lastFour                String            @map("last_four")
+  accountNumberEncrypted  String            @map("account_number_encrypted")
+  accountName             String            @map("account_name")
+  isDefault               Boolean           @default(false) @map("is_default")
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("payment_method")
+}
+
+model Campaign {
+  id                 String          @id @default(uuid()) @db.Uuid
+  brandUserId        String          @map("brand_user_id") @db.Uuid
+  title              String
+  description        String
+  ratePer1k          Decimal         @map("rate_per_1k") @db.Decimal(14, 2)
+  grossBudget        Decimal         @default(0) @map("gross_budget") @db.Decimal(14, 2)
+  spentBudget        Decimal         @default(0) @map("spent_budget") @db.Decimal(14, 2)
+  goalViews          BigInt          @map("goal_views")
+  platforms          Json
+  rules              Json
+  status             CampaignStatus @default(draft)
+  referenceLinks     Json?           @map("reference_links")
+  assetUrls          Json?           @map("asset_urls")
+  coverImageObjectKey String?        @map("cover_image_object_key")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  brand   User                    @relation("BrandCampaigns", fields: [brandUserId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  ledgerEntries LedgerEntry[]
+  checkoutSessions FundingCheckoutSession[]
+
+  @@index([brandUserId, status])
+  @@map("campaign")
+}
+
+model Submission {
+  id                   String             @id @default(uuid()) @db.Uuid
+  campaignId           String             @map("campaign_id") @db.Uuid
+  creatorUserId        String             @map("creator_user_id") @db.Uuid
+  normalizedUrl        String             @map("normalized_url")
+  platform             Platform
+  viewsLocked          BigInt             @map("views_locked")
+  fundedViews          BigInt             @map("funded_views")
+  likesLocked          BigInt?            @map("likes_locked")
+  commentsLocked       BigInt?            @map("comments_locked")
+  grossAmount          Decimal            @map("gross_amount") @db.Decimal(14, 2)
+  creatorNet           Decimal            @map("creator_net") @db.Decimal(14, 2)
+  partialReason        PartialReason?     @map("partial_reason")
+  status               SubmissionStatus @default(pending)
+  rejectionReason      String?            @map("rejection_reason")
+  lastPayoutAttemptAt  DateTime?          @map("last_payout_attempt_at")
+  submittedAt          DateTime           @default(now()) @map("submitted_at")
+  paidAt               DateTime?          @map("paid_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator  User     @relation("CreatorSubmissions", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+
+  @@index([campaignId, status])
+  @@index([creatorUserId, submittedAt(sort: Desc)])
+  @@index([creatorUserId, normalizedUrl])
+  @@map("submission")
+}
+
+model LedgerEntry {
+  id                   String      @id @default(uuid()) @db.Uuid
+  campaignId           String      @map("campaign_id") @db.Uuid
+  ledgerType           LedgerType  @map("ledger_type")
+  amountGross          Decimal     @map("amount_gross") @db.Decimal(14, 2)
+  amountNet            Decimal?    @map("amount_net") @db.Decimal(14, 2)
+  xenditInvoiceId      String?     @map("xendit_invoice_id")
+  xenditPayoutId       String?     @map("xendit_payout_id")
+  xenditFeeAmount      Decimal?    @map("xendit_fee_amount") @db.Decimal(14, 2)
+  platformFeeAmount    Decimal?    @map("platform_fee_amount") @db.Decimal(14, 2)
+  failureReason        String?     @map("failure_reason")
+  idempotencyKey       String?     @map("idempotency_key")
+  relatedSubmissionId  String?     @map("related_submission_id") @db.Uuid
+  note                 String?
+  createdAt            DateTime    @default(now()) @map("created_at")
+
+  campaign  Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  submission Submission? @relation(fields: [relatedSubmissionId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId])
+  @@index([xenditPayoutId])
+  @@index([xenditInvoiceId])
+  @@index([idempotencyKey])
+  @@index([relatedSubmissionId, createdAt(sort: Desc)])
+  @@map("ledger_entry")
+}
+
+model FundingCheckoutSession {
+  id          String        @id @default(uuid()) @db.Uuid
+  campaignId  String        @map("campaign_id") @db.Uuid
+  provider    String        @default("xendit")
+  externalId  String        @unique @map("external_id")
+  checkoutUrl String        @map("checkout_url")
+  status      SessionStatus @default(pending)
+  grossAmount Decimal       @map("gross_amount") @db.Decimal(14, 2)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("funding_checkout_session")
+}

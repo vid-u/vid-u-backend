@@ -1,6 +1,6 @@
 ---
 description: VidU API trust boundary — Supabase Auth + Postgres, Express, Prisma, R2, Xendit, TikTok/Meta
-alwaysApply: true
+alwaysApply: false
 ---
 
 # VidU stack and trust boundary

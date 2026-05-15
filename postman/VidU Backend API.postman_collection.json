@@ -1,0 +1,4620 @@
+{
+  "info": {
+    "_postman_id": "ce10724d-0bb1-446b-a867-460f22813a01",
+    "name": "VidU Backend API",
+    "description": "Public reference for the **VidU** HTTP API.\n\n**Success envelope:** `{ \"success\": true, \"message\": string, \"data\": … }`. Optional top-level **`meta`** only appears on explicitly paginated endpoints.\n\n**Errors:** `{ \"success\": false, \"message\": string }`. **Validation** (Zod) may add `{ \"errors\": { \"fieldErrors\", \"formErrors\" } }`.\n\n**Money:** amounts are **decimal strings** (PHP, two fractional digits) unless noted.\n\n**Timestamps:** ISO-8601 UTC strings.\n\n**Layout:** top-level **Me** (shared Profile / Payment methods / Platforms / creator submissions inbox), **Brand** (nested **Campaigns** + **Submissions** → `brand/campaign.routes.ts`, `brand/submissions.routes.ts`), **Creator** (nested **Campaigns** + **Submissions** + **OAuth** → `creator/campaign.routes.ts`, `creator/submissions.routes.ts`, `creator/oauth.routes.ts`), then **Webhooks**, **Uploads**, **Admin**.\n\n**Auth:** Supabase JWT as `Authorization: Bearer <access_token>`. Use **`brandBearerToken`** for `/brands/...`. **`GET /campaigns` and `GET /campaigns/:id` are public** (no Bearer). Use **`creatorBearerToken`** for authenticated creator routes under `/campaigns` (e.g. submission preview/confirm) and other creator flows.\n\nExample bodies are **illustrative**; replace UUIDs and values with your environment.\n\n**Ledger:** no in-process reconciler cron — use `POST /admin/reconcile-campaign/:campaignId` with HTTP **Basic** auth (`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "17874373"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness. No body."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                },
+                "description": "Liveness. No body."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Server is healthy\",\n  \"data\": {\n    \"status\": \"ok\",\n    \"timestamp\": \"2026-05-14T12:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Liveness alias (same handler as `/health` when mounted)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    ""
+                  ]
+                },
+                "description": "Liveness alias (same handler as `/health` when mounted)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Server is healthy\",\n  \"data\": {\n    \"status\": \"ok\",\n    \"timestamp\": \"2026-05-14T12:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /health/ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "Readiness; pings database."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health/ready",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health",
+                    "ready"
+                  ]
+                },
+                "description": "Readiness; pings database."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Ready\",\n  \"data\": {\n    \"database\": \"up\"\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Public. No authentication."
+    },
+    {
+      "name": "Waitlist",
+      "item": [
+        {
+          "name": "GET /waitlist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/waitlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "waitlist"
+              ]
+            },
+            "description": "No query params. Counts by role."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/waitlist",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "waitlist"
+                  ]
+                },
+                "description": "No query params. Counts by role."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"brand\": 12,\n    \"creator\": 34\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /waitlist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"creator@example.com\",\n  \"role\": \"creator\",\n  \"notes\": \"Optional note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/waitlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "waitlist"
+              ]
+            },
+            "description": "Body (strict): `email`, `role` (brand|creator), optional `notes` (max 2000)."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"creator@example.com\",\n  \"role\": \"creator\",\n  \"notes\": \"Optional note\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/waitlist",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "waitlist"
+                  ]
+                },
+                "description": "Body (strict): `email`, `role` (brand|creator), optional `notes` (max 2000)."
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Added to waitlist\",\n  \"data\": {\n    \"alreadyWhitelisted\": false,\n    \"id\": \"33333333-3333-4333-8333-333333333333\",\n    \"createdAt\": \"2026-05-14T12:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "200 Already listed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"creator@example.com\",\n  \"role\": \"creator\",\n  \"notes\": \"Optional note\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/waitlist",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "waitlist"
+                  ]
+                },
+                "description": "Body (strict): `email`, `role` (brand|creator), optional `notes` (max 2000)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"This email is already whitelisted.\",\n  \"data\": {\n    \"alreadyWhitelisted\": true,\n    \"id\": \"33333333-3333-4333-8333-333333333333\",\n    \"createdAt\": \"2026-05-01T08:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Public waitlist."
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /auth/email/send-code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"you@example.com\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/email/send-code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "email",
+                "send-code"
+              ]
+            },
+            "description": "Body: `email`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"email\": \"you@example.com\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/email/send-code",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "email",
+                    "send-code"
+                  ]
+                },
+                "description": "Body: `email`."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/email/verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"you@example.com\", \"code\": \"123456\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/email/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "email",
+                "verify"
+              ]
+            },
+            "description": "Body: `email`, `code` (4–8 chars). Copy `data.sessionToken` into `brandBearerToken` or `creatorBearerToken`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"email\": \"you@example.com\", \"code\": \"123456\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/email/verify",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "email",
+                    "verify"
+                  ]
+                },
+                "description": "Body: `email`, `code` (4–8 chars). Copy `data.sessionToken` into `brandBearerToken` or `creatorBearerToken`."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"sessionToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example\",\n    \"refreshToken\": \"refresh_example\",\n    \"requiresRoleSelection\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/google/start",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/google/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google",
+                "start"
+              ]
+            },
+            "description": "Browser OAuth start (redirect / cookies)."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /auth/google/callback",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/google/callback?code=AUTH_CODE&state=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "AUTH_CODE"
+                },
+                {
+                  "key": "state",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Query: `code` (required), `state` optional. **302** redirect to frontend with `session_token` (not JSON)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/sign-out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{brandBearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sign-out",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "sign-out"
+              ]
+            },
+            "description": "Optional Bearer. No body."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/sign-out",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "sign-out"
+                  ]
+                },
+                "description": "Optional Bearer. No body."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Email OTP + Google OAuth."
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "GET /me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me"
+              ]
+            },
+            "description": "Example uses **brand** token; same route with **creator** token returns that user."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me"
+                  ]
+                },
+                "description": "Example uses **brand** token; same route with **creator** token returns that user."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"user\": {\n      \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"email\": \"brand@example.com\",\n      \"name\": \"Brand User\",\n      \"avatarUrl\": null\n    },\n    \"roles\": [\n      \"brand\"\n    ],\n    \"primaryRole\": \"brand\",\n    \"profileOnboardingComplete\": {\n      \"brand\": true\n    },\n    \"requiresRoleSelection\": false\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me"
+                  ]
+                },
+                "description": "Example uses **brand** token; same route with **creator** token returns that user."
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "PATCH /me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Display Name\",\n  \"avatarUrl\": \"https://cdn.example.com/avatars/me.png\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me"
+              ]
+            },
+            "description": "Partial update of **`User.name`** (display name) and/or **`User.avatarUrl`**. At least one field is required. Send **`null`** for **name** or **avatarUrl** to clear it. **avatarUrl** must be a valid URL when set. Response body matches **GET /me**."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Display Name\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me"
+                  ]
+                },
+                "description": "Brand or creator token."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"user\": {\n      \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"email\": \"brand@example.com\",\n      \"name\": \"Display Name\",\n      \"avatarUrl\": \"https://cdn.example.com/avatars/me.png\"\n    },\n    \"roles\": [\n      \"brand\"\n    ],\n    \"primaryRole\": \"brand\",\n    \"profileOnboardingComplete\": {\n      \"brand\": true\n    },\n    \"requiresRoleSelection\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "PUT /me/role",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"role\": \"brand\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "role"
+              ]
+            },
+            "description": "Body: `role` brand|creator. 409 if role profile already exists."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"role\": \"brand\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/role",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "role"
+                  ]
+                },
+                "description": "Body: `role` brand|creator. 409 if role profile already exists."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"role\": \"brand\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"role\": \"brand\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/role",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "role"
+                  ]
+                },
+                "description": "Body: `role` brand|creator. 409 if role profile already exists."
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Role already selected\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /me/onboarding/complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/onboarding/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "onboarding",
+                "complete"
+              ]
+            },
+            "description": "Requires exactly one role profile. No body."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/onboarding/complete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "onboarding",
+                    "complete"
+                  ]
+                },
+                "description": "Requires exactly one role profile. No body."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"profileOnboardingComplete\": true,\n    \"role\": \"brand\"\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Session, one-shot role, onboarding, profile DTO, analytics."
+    },
+    {
+      "name": "Payment methods",
+      "item": [
+        {
+          "name": "GET /me/payment-methods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/payment-methods",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "payment-methods"
+              ]
+            },
+            "description": "Example: **creator** token → `creator_payout`. Use **brand** token for `brand_refund`. Max 50. No body."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/payment-methods",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "payment-methods"
+                  ]
+                },
+                "description": "Example: **creator** token → `creator_payout`. Use **brand** token for `brand_refund`. Max 50. No body."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [\n      {\n        \"id\": \"{{paymentMethodId}}\",\n        \"purpose\": \"creator_payout\",\n        \"kind\": \"e_wallet\",\n        \"xenditChannelCode\": \"PH_GCASH\",\n        \"label\": \"My GCash\",\n        \"bankName\": null,\n        \"lastFour\": \"9012\",\n        \"accountName\": \"Juan Dela Cruz\",\n        \"isDefault\": true,\n        \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n        \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /me/payment-methods",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xenditChannelCode\": \"PH_GCASH\",\n  \"label\": \"My GCash\",\n  \"accountNumber\": \"091712349012\",\n  \"accountName\": \"Juan Dela Cruz\",\n  \"isDefault\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me/payment-methods",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "payment-methods"
+              ]
+            },
+            "description": "`xenditChannelCode` must be in the PH channel allowlist (see `xendit_channel_limits.ts`). Bank channels (`PH_BDO`, `PH_BPI`) require `bankName`. Never returns raw account numbers."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"xenditChannelCode\": \"PH_GCASH\",\n  \"label\": \"My GCash\",\n  \"accountNumber\": \"091712349012\",\n  \"accountName\": \"Juan Dela Cruz\",\n  \"isDefault\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/payment-methods",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "payment-methods"
+                  ]
+                },
+                "description": "`xenditChannelCode` must be in the PH channel allowlist (see `xendit_channel_limits.ts`). Bank channels (`PH_BDO`, `PH_BPI`) require `bankName`. Never returns raw account numbers."
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"method\": {\n      \"id\": \"{{paymentMethodId}}\",\n      \"purpose\": \"creator_payout\",\n      \"kind\": \"e_wallet\",\n      \"xenditChannelCode\": \"PH_GCASH\",\n      \"label\": \"My GCash\",\n      \"bankName\": null,\n      \"lastFour\": \"9012\",\n      \"accountName\": \"Juan Dela Cruz\",\n      \"isDefault\": true,\n      \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n    }\n  }\n}"
+            },
+            {
+              "name": "400 Validation",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"xenditChannelCode\": \"PH_GCASH\",\n  \"label\": \"My GCash\",\n  \"accountNumber\": \"091712349012\",\n  \"accountName\": \"Juan Dela Cruz\",\n  \"isDefault\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/payment-methods",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "payment-methods"
+                  ]
+                },
+                "description": "`xenditChannelCode` must be in the PH channel allowlist (see `xendit_channel_limits.ts`). Bank channels (`PH_BDO`, `PH_BPI`) require `bankName`. Never returns raw account numbers."
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Invalid body\",\n  \"errors\": {\n    \"fieldErrors\": {},\n    \"formErrors\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "PATCH /me/payment-methods/:paymentMethodId",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isDefault\": true,\n  \"label\": \"Primary GCash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me/payment-methods/{{paymentMethodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "payment-methods",
+                "{{paymentMethodId}}"
+              ]
+            },
+            "description": "At least one of: `isDefault`, `label`, `bankName` (use `null` to clear bankName on e-wallet rows only if allowed)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isDefault\": true,\n  \"label\": \"Primary GCash\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/payment-methods/{{paymentMethodId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "payment-methods",
+                    "{{paymentMethodId}}"
+                  ]
+                },
+                "description": "At least one of: `isDefault`, `label`, `bankName` (use `null` to clear bankName on e-wallet rows only if allowed)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"method\": {\n      \"id\": \"{{paymentMethodId}}\",\n      \"purpose\": \"creator_payout\",\n      \"kind\": \"e_wallet\",\n      \"xenditChannelCode\": \"PH_GCASH\",\n      \"label\": \"My GCash\",\n      \"bankName\": null,\n      \"lastFour\": \"9012\",\n      \"accountName\": \"Juan Dela Cruz\",\n      \"isDefault\": true,\n      \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "DELETE /me/payment-methods/:paymentMethodId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/payment-methods/{{paymentMethodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "payment-methods",
+                "{{paymentMethodId}}"
+              ]
+            },
+            "description": "Deletes method; if it was default, another method becomes default when any remain."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/payment-methods/{{paymentMethodId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "payment-methods",
+                    "{{paymentMethodId}}"
+                  ]
+                },
+                "description": "Deletes method; if it was default, another method becomes default when any remain."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "`/me/payment-methods` — purpose comes from JWT role."
+    },
+    {
+      "name": "Brand",
+      "item": [
+        {
+          "name": "Profile",
+          "item": [
+            {
+              "name": "GET /me/profile",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "profile"
+                  ]
+                },
+                "description": "Brand-shaped DTO."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/profile",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "profile"
+                      ]
+                    },
+                    "description": "Brand-shaped DTO."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"brandName\": \"WOK BANG\",\n    \"logoUrl\": \"https://cdn.example.com/brands/wokbang/logo.png\",\n    \"website\": \"https://wokbang.ph\",\n    \"instagram\": \"@wokbangph\",\n    \"facebook\": null,\n    \"tiktok\": null\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "PUT /me/profile",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"brandName\": \"WOK BANG\",\n  \"website\": \"https://wokbang.ph\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "profile"
+                  ]
+                },
+                "description": "Partial update; optional `logoObjectKey` after `POST /uploads/presign` (brand_logo)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "PUT",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"brandName\": \"WOK BANG\",\n  \"website\": \"https://wokbang.ph\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/me/profile",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "profile"
+                      ]
+                    },
+                    "description": "Partial update; optional `logoObjectKey` after `POST /uploads/presign` (brand_logo)."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"brandName\": \"WOK BANG\",\n    \"logoUrl\": \"https://cdn.example.com/brands/wokbang/logo.png\",\n    \"website\": \"https://wokbang.ph\",\n    \"instagram\": \"@wokbangph\",\n    \"facebook\": null,\n    \"tiktok\": null\n  }\n}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Dashboard",
+          "item": [
+            {
+              "name": "GET /me/analytics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/analytics",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "analytics"
+                  ]
+                },
+                "description": "Ledger-backed monthly/yearly `deposits` + `spend`."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/analytics",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "analytics"
+                      ]
+                    },
+                    "description": "Ledger-backed monthly/yearly `deposits` + `spend`."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"monthly\": [\n      {\n        \"period\": \"2026-05\",\n        \"deposits\": \"10000.00\",\n        \"spend\": \"0.00\"\n      }\n    ],\n    \"yearly\": [\n      {\n        \"period\": \"2026\",\n        \"deposits\": \"10000.00\",\n        \"spend\": \"0.00\"\n      }\n    ]\n  }\n}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Campaigns",
+          "item": [
+            {
+              "name": "Brand — GET /brands/campaigns",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns"
+                  ]
+                },
+                "description": "No query params. No body."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns"
+                      ]
+                    },
+                    "description": "No query params. No body."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [\n      {\n        \"id\": \"{{campaignId}}\",\n        \"status\": \"active\",\n        \"brandName\": \"BREW THEORY\",\n        \"title\": \"Cafe Vibes\",\n        \"description\": \"We want more people near our shops to know we are here.\",\n        \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n        \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n        \"goalViews\": \"862068\",\n        \"fundedViewsTotal\": \"0\",\n        \"platforms\": [\n          \"tiktok\",\n          \"facebook\"\n        ],\n        \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n      }\n    ]\n  }\n}"
+                },
+                {
+                  "name": "401 Unauthorized",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns"
+                      ]
+                    },
+                    "description": "No query params. No body."
+                  },
+                  "status": "Unauthorized",
+                  "code": 401,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Unauthorized\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — POST /brands/campaigns",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Summer UGC push\",\n  \"description\": \"Full brief text here.\",\n  \"ratePer1k\": 40,\n  \"plannedGrossBudget\": 10000,\n  \"platforms\": [\n    \"tiktok\",\n    \"facebook\"\n  ],\n  \"rules\": [\n    \"Original audio only\",\n    \"No competitor mentions\"\n  ],\n  \"referenceLinks\": [\n    \"https://drive.google.com/file/d/example/view\"\n  ],\n  \"assetUrls\": [\n    \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n  ],\n  \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns"
+                  ]
+                },
+                "description": "Create draft campaign. See raw body for all fields."
+              },
+              "response": [
+                {
+                  "name": "201 Created",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"title\": \"Summer UGC push\",\n  \"description\": \"Full brief text here.\",\n  \"ratePer1k\": 40,\n  \"plannedGrossBudget\": 10000,\n  \"platforms\": [\n    \"tiktok\",\n    \"facebook\"\n  ],\n  \"rules\": [\n    \"Original audio only\",\n    \"No competitor mentions\"\n  ],\n  \"referenceLinks\": [\n    \"https://drive.google.com/file/d/example/view\"\n  ],\n  \"assetUrls\": [\n    \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n  ],\n  \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns"
+                      ]
+                    },
+                    "description": "Create draft campaign. See raw body for all fields."
+                  },
+                  "status": "Created",
+                  "code": 201,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"brandUserId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"title\": \"Summer UGC push\",\n      \"description\": \"Full brief text here.\",\n      \"ratePer1k\": \"40.00\",\n      \"spentBudget\": \"0.00\",\n      \"goalViews\": \"212500\",\n      \"platforms\": [\n        \"tiktok\",\n        \"facebook\"\n      ],\n      \"rules\": [\n        \"Original audio only\",\n        \"No competitor mentions\"\n      ],\n      \"status\": \"draft\",\n      \"referenceLinks\": [\n        \"https://drive.google.com/file/d/example/view\"\n      ],\n      \"assetUrls\": [\n        \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n      ],\n      \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n      \"netBudget\": \"8500.00\",\n      \"reservedBudget\": \"0.00\",\n      \"availableBudget\": \"8500.00\",\n      \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\",\n      \"brandName\": \"BREW THEORY\",\n      \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\"\n    }\n  }\n}\n"
+                },
+                {
+                  "name": "400 Validation",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"title\": \"Summer UGC push\",\n  \"description\": \"Full brief text here.\",\n  \"ratePer1k\": 40,\n  \"plannedGrossBudget\": 10000,\n  \"platforms\": [\n    \"tiktok\",\n    \"facebook\"\n  ],\n  \"rules\": [\n    \"Original audio only\",\n    \"No competitor mentions\"\n  ],\n  \"referenceLinks\": [\n    \"https://drive.google.com/file/d/example/view\"\n  ],\n  \"assetUrls\": [\n    \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n  ],\n  \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns"
+                      ]
+                    },
+                    "description": "Create draft campaign. See raw body for all fields."
+                  },
+                  "status": "Bad Request",
+                  "code": 400,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Invalid body\",\n  \"errors\": {\n    \"fieldErrors\": {},\n    \"formErrors\": []\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — GET /brands/campaigns/:campaignId",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}"
+                  ]
+                },
+                "description": "Path: `campaignId`."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "Path: `campaignId`."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"brandUserId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"brandName\": \"BREW THEORY\",\n      \"title\": \"Summer UGC push\",\n      \"description\": \"Full brief text here.\",\n      \"ratePer1k\": \"40.00\",\n      \"spentBudget\": \"0.00\",\n      \"goalViews\": \"212500\",\n      \"platforms\": [\n        \"tiktok\",\n        \"facebook\"\n      ],\n      \"rules\": [\n        \"Original audio only\",\n        \"No competitor mentions\"\n      ],\n      \"status\": \"draft\",\n      \"referenceLinks\": [\n        \"https://drive.google.com/file/d/example/view\"\n      ],\n      \"assetUrls\": [\n        \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n      ],\n      \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n      \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n      \"netBudget\": \"8500.00\",\n      \"reservedBudget\": \"0.00\",\n      \"availableBudget\": \"8500.00\",\n      \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n    }\n  }\n}"
+                },
+                {
+                  "name": "404 Not Found",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "Path: `campaignId`."
+                  },
+                  "status": "Not Found",
+                  "code": 404,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Resource not found\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — PATCH /brands/campaigns/:campaignId",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"paused\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}"
+                  ]
+                },
+                "description": "Partial update. **status** and **coverImageObjectKey** can change any time (subject to other rules, e.g. publish floor when setting active).\n\n**title**, **description**, **platforms**, **ratePer1k**, **rules**, **referenceLinks**, **assetUrls** are allowed only while the campaign is **draft** or the campaign has **no submissions** yet. Otherwise the server responds with **409** `campaign_details_locked`."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "PATCH",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"status\": \"paused\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "Same policy as the saved request."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"brandUserId\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"title\": \"Summer UGC push\",\n      \"description\": \"Full brief text here.\",\n      \"ratePer1k\": \"40.00\",\n      \"spentBudget\": \"0.00\",\n      \"goalViews\": \"212500\",\n      \"platforms\": [\n        \"tiktok\",\n        \"facebook\"\n      ],\n      \"rules\": [\n        \"Original audio only\",\n        \"No competitor mentions\"\n      ],\n      \"status\": \"paused\",\n      \"referenceLinks\": [\n        \"https://drive.google.com/file/d/example/view\"\n      ],\n      \"assetUrls\": [\n        \"https://cdn.example.com/brand/raw-footage-broll.mp4\"\n      ],\n      \"coverImageObjectKey\": \"campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n      \"netBudget\": \"8500.00\",\n      \"reservedBudget\": \"0.00\",\n      \"availableBudget\": \"8500.00\",\n      \"createdAt\": \"2026-05-14T10:00:00.000Z\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\",\n      \"brandName\": \"BREW THEORY\",\n      \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\"\n    }\n  }\n}\n"
+                },
+                {
+                  "name": "409 campaign_details_locked",
+                  "originalRequest": {
+                    "method": "PATCH",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"title\": \"New title\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "Campaign is not draft and has at least one submission."
+                  },
+                  "status": "Conflict",
+                  "code": 409,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"campaign_details_locked\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — POST /brands/campaigns/:campaignId/checkout",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"grossAmount\": 10000,\n  \"intent\": \"add_funds\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/checkout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "checkout"
+                  ]
+                },
+                "description": "Body: `grossAmount`, optional `intent` (add_funds|initial_publish)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"grossAmount\": 10000,\n  \"intent\": \"add_funds\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/checkout",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "checkout"
+                      ]
+                    },
+                    "description": "Body: `grossAmount`, optional `intent` (add_funds|initial_publish)."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"checkoutUrl\": \"https://checkout.xendit.co/web/abc123\",\n    \"sessionId\": \"fund_44444444-4444-4444-8444-444444444444\",\n    \"invoiceId\": \"inv_xxxxxxxx\"\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — POST /brands/campaigns/:campaignId/release-payout",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/release-payout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "release-payout"
+                  ]
+                },
+                "description": "No body."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/release-payout",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "release-payout"
+                      ]
+                    },
+                    "description": "No body."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"released\": 2\n  }\n}"
+                },
+                {
+                  "name": "409 nothing_to_pay",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/release-payout",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "release-payout"
+                      ]
+                    },
+                    "description": "No body."
+                  },
+                  "status": "Conflict",
+                  "code": 409,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"nothing_to_pay\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — POST /brands/campaigns/:campaignId/refund",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/refund",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "refund"
+                  ]
+                },
+                "description": "No body."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/refund",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "refund"
+                      ]
+                    },
+                    "description": "No body."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"refunded\": \"1250.50\"\n  }\n}"
+                }
+              ]
+            }
+          ],
+          "description": "Lifecycle, funding, checkout, release-payout, refund."
+        },
+        {
+          "name": "Submissions",
+          "item": [
+            {
+              "name": "Brand — GET /brands/campaigns/:campaignId/submissions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/submissions?status=pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "submissions"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "pending"
+                    }
+                  ]
+                },
+                "description": "Query optional `status`: pending|paying|paid|payout_failed|rejected."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/submissions?status=pending",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions"
+                      ],
+                      "query": [
+                        {
+                          "key": "status",
+                          "value": "pending"
+                        }
+                      ]
+                    },
+                    "description": "Query optional `status`: pending|paying|paid|payout_failed|rejected."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [\n      {\n        \"id\": \"{{submissionId}}\",\n        \"campaignId\": \"{{campaignId}}\",\n        \"normalizedUrl\": \"tiktok:https://www.tiktok.com/@user/video/123\",\n        \"platform\": \"tiktok\",\n        \"viewsLocked\": \"12400\",\n        \"fundedViews\": \"12400\",\n        \"creatorNet\": \"396.80\",\n        \"partialReason\": null,\n        \"status\": \"pending\",\n        \"submittedAt\": \"2026-05-14T11:30:00.000Z\"\n      }\n    ]\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Brand — POST …/submissions/:submissionId/reject",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"Does not meet brief\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/submissions/{{submissionId}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "brands",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "submissions",
+                    "{{submissionId}}",
+                    "reject"
+                  ]
+                },
+                "description": "Body: `reason`. Paths: campaignId, submissionId."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{brandBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"reason\": \"Does not meet brief\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/brands/campaigns/{{campaignId}}/submissions/{{submissionId}}/reject",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "brands",
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions",
+                        "{{submissionId}}",
+                        "reject"
+                      ]
+                    },
+                    "description": "Body: `reason`. Paths: campaignId, submissionId."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+                }
+              ]
+            }
+          ],
+          "description": "Per-campaign review."
+        }
+      ],
+      "description": "**Brand-only** `/brands/...` — **`Bearer {{brandBearerToken}}`**. Routers: `src/routes/brand/campaign.routes.ts`, `src/routes/brand/submissions.routes.ts` (composed in `brand/index.ts`)."
+    },
+    {
+      "name": "Creator",
+      "item": [
+        {
+          "name": "Profile",
+          "item": [
+            {
+              "name": "GET /me/profile (creator)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "profile"
+                  ]
+                },
+                "description": "Creator-shaped DTO (`platformLinks`)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/profile",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "profile"
+                      ]
+                    },
+                    "description": "Creator-shaped DTO (`platformLinks`)."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"platformLinks\": [\n      {\n        \"platform\": \"tiktok\",\n        \"displayHandle\": \"creator_handle\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:00:00.000Z\"\n      },\n      {\n        \"platform\": \"facebook\",\n        \"displayHandle\": \"creator_ig\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:05:00.000Z\"\n      }\n    ]\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "PUT /me/profile (creator)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/me/profile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "profile"
+                  ]
+                },
+                "description": "Body must be `{}` (strict). Returns current profile."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "PUT",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/me/profile",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "profile"
+                      ]
+                    },
+                    "description": "Body must be `{}` (strict). Returns current profile."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"platformLinks\": [\n      {\n        \"platform\": \"tiktok\",\n        \"displayHandle\": \"creator_handle\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:00:00.000Z\"\n      },\n      {\n        \"platform\": \"facebook\",\n        \"displayHandle\": \"creator_ig\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:05:00.000Z\"\n      }\n    ]\n  }\n}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Dashboard",
+          "item": [
+            {
+              "name": "GET /me/analytics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/analytics",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "analytics"
+                  ]
+                },
+                "description": "Paid submission earnings by period."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/analytics",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "analytics"
+                      ]
+                    },
+                    "description": "Paid submission earnings by period."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"monthly\": [\n      {\n        \"period\": \"2026-05\",\n        \"earnings\": \"0.00\"\n      }\n    ],\n    \"yearly\": [\n      {\n        \"period\": \"2026\",\n        \"earnings\": \"0.00\"\n      }\n    ]\n  }\n}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Campaigns",
+          "item": [
+            {
+              "name": "Public — GET /campaigns",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/campaigns?status=all&sort=newest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "campaigns"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "all"
+                    },
+                    {
+                      "key": "sort",
+                      "value": "newest"
+                    }
+                  ]
+                },
+                "description": "**Public — no `Authorization` required** (marketing site + app).\n\n**Query (all optional; strict — unknown keys → 400):**\n- **`status`:** `all` (default) = non-draft campaigns (`active`, `paused`, `ended`); `active` | `paused` | `ended` narrows to that lifecycle state. **Never** returns `draft`.\n- **`platform`:** `tiktok` | `facebook` — campaign must include this platform in its `platforms` JSON array.\n- **`sort`:** `newest` (default) = `updatedAt` descending; `highest_rate` = `ratePer1k` descending, then recency.\n\n**Response `data`:**\n- **`items`:** preview cards (max **`limit`** 50).\n- **`filters`:** echo of applied query.\n\nEach list item: **`id`**, **`brandName`**, **`title`**, **`description`**, **`status`**, **`platforms`**, **`coverImageUrl`**, **`brandLogoUrl`**, **`totalBudget`** (net pool after the platform deposit fee), **`consumedBudget`** (paid out + reserved for in-flight submissions), **`updatedAt`**."
+              },
+              "response": [
+                {
+                  "name": "200 OK (with items)",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns?status=all&sort=newest",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns"
+                      ],
+                      "query": [
+                        {
+                          "key": "status",
+                          "value": "all"
+                        },
+                        {
+                          "key": "sort",
+                          "value": "newest"
+                        }
+                      ]
+                    },
+                    "description": "**Public — no `Authorization` required** (marketing site + app).\n\n**Query (all optional; strict — unknown keys → 400):**\n- **`status`:** `all` (default) = non-draft campaigns (`active`, `paused`, `ended`); `active` | `paused` | `ended` narrows to that lifecycle state. **Never** returns `draft`.\n- **`platform`:** `tiktok` | `facebook` — campaign must include this platform in its `platforms` JSON array.\n- **`sort`:** `newest` (default) = `updatedAt` descending; `highest_rate` = `ratePer1k` descending, then recency.\n\n**Response `data`:**\n- **`items`:** preview cards (max **`limit`** 50).\n- **`filters`:** echo of applied query.\n\nEach list item: **`id`**, **`brandName`**, **`title`**, **`description`**, **`status`**, **`platforms`**, **`coverImageUrl`**, **`brandLogoUrl`**, **`totalBudget`** (net pool after the platform deposit fee), **`consumedBudget`** (paid out + reserved for in-flight submissions), **`updatedAt`**."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [\n      {\n        \"id\": \"{{campaignId}}\",\n        \"brandName\": \"WOK BANG\",\n        \"title\": \"Kitchen Glow-Up\",\n        \"description\": \"Show our new wok lineup in real home kitchens.\",\n        \"status\": \"active\",\n        \"platforms\": [\n          \"tiktok\",\n          \"facebook\"\n        ],\n        \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n        \"brandLogoUrl\": \"https://cdn.example.com/brands/wokbang/logo.png\",\n        \"totalBudget\": \"42500.00\",\n        \"consumedBudget\": \"0.00\",\n        \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n      }\n    ],\n    \"limit\": 50,\n    \"filters\": {\n      \"status\": \"all\",\n      \"platform\": null,\n      \"sort\": \"newest\"\n    }\n  }\n}\n"
+                },
+                {
+                  "name": "200 OK (empty)",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns?status=all&sort=newest",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns"
+                      ],
+                      "query": [
+                        {
+                          "key": "status",
+                          "value": "all"
+                        },
+                        {
+                          "key": "sort",
+                          "value": "newest"
+                        }
+                      ]
+                    },
+                    "description": "**Public — no `Authorization` required** (marketing site + app).\n\n**Query (all optional; strict — unknown keys → 400):**\n- **`status`:** `all` (default) = non-draft campaigns (`active`, `paused`, `ended`); `active` | `paused` | `ended` narrows to that lifecycle state. **Never** returns `draft`.\n- **`platform`:** `tiktok` | `facebook` — campaign must include this platform in its `platforms` JSON array.\n- **`sort`:** `newest` (default) = `updatedAt` descending; `highest_rate` = `ratePer1k` descending, then recency.\n\n**Response `data`:**\n- **`items`:** preview cards (max **`limit`** 50).\n- **`filters`:** echo of applied query.\n\nEach list item: **`id`**, **`brandName`**, **`title`**, **`description`**, **`status`**, **`platforms`**, **`coverImageUrl`**, **`brandLogoUrl`**, **`totalBudget`** (net pool after the platform deposit fee), **`consumedBudget`** (paid out + reserved for in-flight submissions), **`updatedAt`**."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [],\n    \"limit\": 50,\n    \"filters\": {\n      \"status\": \"paused\",\n      \"platform\": \"tiktok\",\n      \"sort\": \"highest_rate\"\n    }\n  }\n}"
+                },
+                {
+                  "name": "400 Validation (bad query)",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns?status=all&sort=newest",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns"
+                      ],
+                      "query": [
+                        {
+                          "key": "status",
+                          "value": "all"
+                        },
+                        {
+                          "key": "sort",
+                          "value": "newest"
+                        }
+                      ]
+                    },
+                    "description": "**Public — no `Authorization` required** (marketing site + app).\n\n**Query (all optional; strict — unknown keys → 400):**\n- **`status`:** `all` (default) = non-draft campaigns (`active`, `paused`, `ended`); `active` | `paused` | `ended` narrows to that lifecycle state. **Never** returns `draft`.\n- **`platform`:** `tiktok` | `facebook` — campaign must include this platform in its `platforms` JSON array.\n- **`sort`:** `newest` (default) = `updatedAt` descending; `highest_rate` = `ratePer1k` descending, then recency.\n\n**Response `data`:**\n- **`items`:** preview cards (max **`limit`** 50).\n- **`filters`:** echo of applied query.\n\nEach list item: **`id`**, **`brandName`**, **`title`**, **`description`**, **`status`**, **`platforms`**, **`coverImageUrl`**, **`brandLogoUrl`**, **`totalBudget`** (net pool after the platform deposit fee), **`consumedBudget`** (paid out + reserved for in-flight submissions), **`updatedAt`**."
+                  },
+                  "status": "Bad Request",
+                  "code": 400,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Invalid body\",\n  \"errors\": {\n    \"fieldErrors\": {},\n    \"formErrors\": []\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Public — GET /campaigns/:campaignId",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/campaigns/{{campaignId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "campaigns",
+                    "{{campaignId}}"
+                  ]
+                },
+                "description": "**Public — no `Authorization` required.** Returns `{ \"campaign\": … }` for one discoverable campaign (`active` | `paused` | `ended`). **404** if draft, missing, or not discoverable.\n\nThe **`campaign`** object includes brief fields, **`rules`**, **`referenceLinks`**, **`assetUrls`**, **`ratePer1k`**, plus **`totalBudget`** and **`consumedBudget`** (same semantics as the list). No `grossBudget`, `spentBudget`, or `availableBudget`."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "**Public — no `Authorization` required.** Returns `{ \"campaign\": … }` for one discoverable campaign (`active` | `paused` | `ended`). **404** if draft, missing, or not discoverable.\n\nThe **`campaign`** object includes brief fields, **`rules`**, **`referenceLinks`**, **`assetUrls`**, **`ratePer1k`**, plus **`totalBudget`** and **`consumedBudget`** (same semantics as the list). No `grossBudget`, `spentBudget`, or `availableBudget`."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"brandName\": \"WOK BANG\",\n      \"title\": \"Kitchen Glow-Up\",\n      \"description\": \"Show our new wok lineup in real home kitchens.\",\n      \"status\": \"active\",\n      \"platforms\": [\n        \"tiktok\",\n        \"facebook\"\n      ],\n      \"rules\": [\n        \"Original audio only\",\n        \"Tag @WokBangPH\"\n      ],\n      \"referenceLinks\": [\n        \"https://example.com/brief\"\n      ],\n      \"assetUrls\": null,\n      \"coverImageUrl\": \"https://cdn.example.com/campaigns/11111111-1111-4111-8111-111111111111/cover.jpg\",\n      \"brandLogoUrl\": \"https://cdn.example.com/brands/wokbang/logo.png\",\n      \"ratePer1k\": \"40.00\",\n      \"totalBudget\": \"42500.00\",\n      \"consumedBudget\": \"0.00\",\n      \"updatedAt\": \"2026-05-14T10:00:00.000Z\"\n    }\n  }\n}\n"
+                },
+                {
+                  "name": "404 Not Found",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}"
+                      ]
+                    },
+                    "description": "**Public — no `Authorization` required.** Returns `{ \"campaign\": … }` for one discoverable campaign (`active` | `paused` | `ended`). **404** if draft, missing, or not discoverable.\n\nThe **`campaign`** object includes brief fields, **`rules`**, **`referenceLinks`**, **`assetUrls`**, **`ratePer1k`**, plus **`totalBudget`** and **`consumedBudget`** (same semantics as the list). No `grossBudget`, `spentBudget`, or `availableBudget`."
+                  },
+                  "status": "Not Found",
+                  "code": 404,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Resource not found\"\n}"
+                }
+              ]
+            }
+          ],
+          "description": "Public discovery (`GET /campaigns`, `GET /campaigns/:id`). Submissions routes still require a creator Bearer token."
+        },
+        {
+          "name": "Submissions",
+          "item": [
+            {
+              "name": "GET /me/submissions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/submissions?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "submissions"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Query: `page`, `limit`, optional `status`. Each item includes **`payout`** (PHP string, creator net for that row). Brand gross is not returned."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/submissions?page=1&limit=20",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "submissions"
+                      ],
+                      "query": [
+                        {
+                          "key": "page",
+                          "value": "1"
+                        },
+                        {
+                          "key": "limit",
+                          "value": "20"
+                        }
+                      ]
+                    },
+                    "description": "Query: `page`, `limit`, optional `status`. Each item includes **`payout`** (creator net, PHP). Brand gross is omitted."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"items\": [\n      {\n        \"id\": \"{{submissionId}}\",\n        \"campaignId\": \"{{campaignId}}\",\n        \"campaignTitle\": \"Kitchen Glow-Up\",\n        \"campaignStatus\": \"active\",\n        \"normalizedUrl\": \"tiktok:https://www.tiktok.com/@user/video/123\",\n        \"platform\": \"tiktok\",\n        \"viewsLocked\": \"12400\",\n        \"fundedViews\": \"12400\",\n        \"payout\": \"396.80\",\n        \"partialReason\": null,\n        \"status\": \"pending\",\n        \"rejectionReason\": null,\n        \"submittedAt\": \"2026-05-14T11:30:00.000Z\",\n        \"paidAt\": null\n      }\n    ]\n  },\n  \"meta\": {\n    \"page\": 1,\n    \"current_page\": 1,\n    \"limit\": 20,\n    \"items_per_page\": 20,\n    \"total\": 1,\n    \"total_items\": 1,\n    \"total_pages\": 1\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Creator — POST /campaigns/:campaignId/submissions/preview",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions/preview",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "campaigns",
+                    "{{campaignId}}",
+                    "submissions",
+                    "preview"
+                  ]
+                },
+                "description": "**Body:** `url` (canonical content URL), `platform` (`tiktok` | `facebook`).\n\nServer fetches **live view/like/comment counts** via the creator's linked platform account; client-supplied counts are ignored.\n\n**403** `creator_default_payment_method_required` if no default creator payout method (same as **POST** `/campaigns/:id/submissions`). **401** `platform_reconnect_required` if platform tokens need refresh. **400** if URL invalid or views below product threshold."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions/preview",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions",
+                        "preview"
+                      ]
+                    },
+                    "description": "**Body:** `url` (canonical content URL), `platform` (`tiktok` | `facebook`).\n\nServer fetches **live view/like/comment counts** via the creator's linked platform account; client-supplied counts are ignored.\n\n**403** `creator_default_payment_method_required` if no default creator payout method (same as **POST** `/campaigns/:id/submissions`). **401** `platform_reconnect_required` if platform tokens need refresh. **400** if URL invalid or views below product threshold."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"eligible\": true,\n    \"views\": \"12400\",\n    \"likes\": \"100\",\n    \"comments\": \"20\",\n    \"issues\": []\n  }\n}"
+                },
+                {
+                  "name": "403 creator_default_payment_method_required",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions/preview",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions",
+                        "preview"
+                      ]
+                    },
+                    "description": "**Body:** `url` (canonical content URL), `platform` (`tiktok` | `facebook`).\n\nServer fetches **live view/like/comment counts** via the creator's linked platform account; client-supplied counts are ignored.\n\n**403** `creator_default_payment_method_required` if no default creator payout method (same as **POST** `/campaigns/:id/submissions`). **401** `platform_reconnect_required` if platform tokens need refresh. **400** if URL invalid or views below product threshold."
+                  },
+                  "status": "Forbidden",
+                  "code": 403,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"creator_default_payment_method_required\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Creator — POST /campaigns/:campaignId/submissions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "campaigns",
+                    "{{campaignId}}",
+                    "submissions"
+                  ]
+                },
+                "description": "Same **`url`** + **`platform`** as preview. Persists submission with server-computed `views_locked`, `funded_views`, amounts, optional `partialReason`.\n\n**403** `creator_default_payment_method_required` if no default creator payout method. **401** `platform_reconnect_required` if platform tokens need refresh.\n\n**409** cases include `campaign_not_active`, `duplicate_submission`, `below_minimum_payout`, pool caps."
+              },
+              "response": [
+                {
+                  "name": "201 Created",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions"
+                      ]
+                    },
+                    "description": "Same **`url`** + **`platform`** as preview. **403** / **401** / **409** as on the saved request."
+                  },
+                  "status": "Created",
+                  "code": 201,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"submission\": {\n      \"id\": \"{{submissionId}}\",\n      \"status\": \"pending\"\n    }\n  }\n}"
+                },
+                {
+                  "name": "403 creator_default_payment_method_required",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions"
+                      ]
+                    },
+                    "description": "No default creator payout payment method."
+                  },
+                  "status": "Forbidden",
+                  "code": 403,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"creator_default_payment_method_required\"\n}"
+                },
+                {
+                  "name": "409 duplicate_submission",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"url\": \"https://www.tiktok.com/@user/video/123\",\n  \"platform\": \"tiktok\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/campaigns/{{campaignId}}/submissions",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "campaigns",
+                        "{{campaignId}}",
+                        "submissions"
+                      ]
+                    },
+                    "description": "Same **`url`** + **`platform`** as preview. Persists submission with server-computed `views_locked`, `funded_views`, amounts, optional `partialReason`. **409** cases include `campaign_not_active`, `duplicate_submission`, `below_minimum_payout`, pool caps."
+                  },
+                  "status": "Conflict",
+                  "code": 409,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"duplicate_submission\"\n}"
+                }
+              ]
+            }
+          ],
+          "description": "Preview + confirm."
+        },
+        {
+          "name": "OAuth",
+          "item": [
+            {
+              "name": "Creator — GET /oauth/tiktok/start",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/oauth/tiktok/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "oauth",
+                    "tiktok",
+                    "start"
+                  ]
+                },
+                "description": "Redirects to TikTok consent. **503** if TikTok env missing."
+              },
+              "response": [
+                {
+                  "name": "302 → TikTok authorize",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/tiktok/start",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "tiktok",
+                        "start"
+                      ]
+                    },
+                    "description": "Redirects to TikTok consent. **503** if TikTok env missing."
+                  },
+                  "status": "Found",
+                  "code": 302,
+                  "_postman_previewlanguage": "plain",
+                  "header": [
+                    {
+                      "key": "Location",
+                      "value": "https://www.tiktok.com/v2/auth/authorize/?client_key=…"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                },
+                {
+                  "name": "503 Not configured",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/tiktok/start",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "tiktok",
+                        "start"
+                      ]
+                    },
+                    "description": "Redirects to TikTok consent. **503** if TikTok env missing."
+                  },
+                  "status": "Service Unavailable",
+                  "code": 503,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"TikTok OAuth is not configured (TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET)\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "GET /oauth/tiktok/callback",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/oauth/tiktok/callback?code=AUTH_CODE&state=STATE_JWT",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "oauth",
+                    "tiktok",
+                    "callback"
+                  ],
+                  "query": [
+                    {
+                      "key": "code",
+                      "value": "AUTH_CODE"
+                    },
+                    {
+                      "key": "state",
+                      "value": "STATE_JWT"
+                    }
+                  ]
+                },
+                "description": "Browser redirect from TikTok (no Authorization). `state` must match signed JWT from `/start`."
+              },
+              "response": [
+                {
+                  "name": "302 → SPA success",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/tiktok/callback?code=AUTH_CODE&state=STATE_JWT",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "tiktok",
+                        "callback"
+                      ],
+                      "query": [
+                        {
+                          "key": "code",
+                          "value": "AUTH_CODE"
+                        },
+                        {
+                          "key": "state",
+                          "value": "STATE_JWT"
+                        }
+                      ]
+                    },
+                    "description": "Browser redirect from TikTok (no Authorization). `state` must match signed JWT from `/start`."
+                  },
+                  "status": "Found",
+                  "code": 302,
+                  "_postman_previewlanguage": "plain",
+                  "header": [
+                    {
+                      "key": "Location",
+                      "value": "http://localhost:5173?oauth=success&platform=tiktok"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                }
+              ]
+            },
+            {
+              "name": "Creator — GET /oauth/facebook/start",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/oauth/facebook/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "oauth",
+                    "facebook",
+                    "start"
+                  ]
+                },
+                "description": "Redirects to Facebook Login (Instagram + Pages scopes). **503** if Meta env missing."
+              },
+              "response": [
+                {
+                  "name": "302 → Facebook dialog",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/facebook/start",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "facebook",
+                        "start"
+                      ]
+                    },
+                    "description": "Redirects to Facebook Login (Instagram + Pages scopes). **503** if Meta env missing."
+                  },
+                  "status": "Found",
+                  "code": 302,
+                  "_postman_previewlanguage": "plain",
+                  "header": [
+                    {
+                      "key": "Location",
+                      "value": "https://www.facebook.com/v21.0/dialog/oauth?client_id=…"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                },
+                {
+                  "name": "503 Not configured",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/facebook/start",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "facebook",
+                        "start"
+                      ]
+                    },
+                    "description": "Redirects to Facebook Login (Instagram + Pages scopes). **503** if Meta env missing."
+                  },
+                  "status": "Service Unavailable",
+                  "code": 503,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Meta OAuth is not configured (META_APP_ID / META_APP_SECRET)\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "GET /oauth/facebook/callback",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/oauth/facebook/callback?code=AUTH_CODE&state=STATE_JWT",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "oauth",
+                    "facebook",
+                    "callback"
+                  ],
+                  "query": [
+                    {
+                      "key": "code",
+                      "value": "AUTH_CODE"
+                    },
+                    {
+                      "key": "state",
+                      "value": "STATE_JWT"
+                    }
+                  ]
+                },
+                "description": "Browser redirect from Meta (no Authorization)."
+              },
+              "response": [
+                {
+                  "name": "302 → SPA success",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/oauth/facebook/callback?code=AUTH_CODE&state=STATE_JWT",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "oauth",
+                        "facebook",
+                        "callback"
+                      ],
+                      "query": [
+                        {
+                          "key": "code",
+                          "value": "AUTH_CODE"
+                        },
+                        {
+                          "key": "state",
+                          "value": "STATE_JWT"
+                        }
+                      ]
+                    },
+                    "description": "Browser redirect from Meta (no Authorization)."
+                  },
+                  "status": "Found",
+                  "code": 302,
+                  "_postman_previewlanguage": "plain",
+                  "header": [
+                    {
+                      "key": "Location",
+                      "value": "http://localhost:5173?oauth=success&platform=facebook"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                }
+              ]
+            }
+          ],
+          "description": "TikTok / Meta connect."
+        },
+        {
+          "name": "Platforms",
+          "item": [
+            {
+              "name": "GET /me/platforms",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/platforms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "platforms"
+                  ]
+                },
+                "description": "Lists linked TikTok / Meta (Instagram) accounts (no tokens)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/platforms",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "platforms"
+                      ]
+                    },
+                    "description": "Lists linked TikTok / Meta (Instagram) accounts (no tokens)."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"platformLinks\": [\n      {\n        \"platform\": \"tiktok\",\n        \"displayHandle\": \"creator_handle\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:00:00.000Z\"\n      },\n      {\n        \"platform\": \"facebook\",\n        \"displayHandle\": \"creator_ig\",\n        \"linkStatus\": \"connected\",\n        \"connectedAt\": \"2026-05-14T10:05:00.000Z\"\n      }\n    ]\n  }\n}"
+                },
+                {
+                  "name": "401 Unauthorized",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/platforms",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "platforms"
+                      ]
+                    },
+                    "description": "Lists linked TikTok / Meta (Instagram) accounts (no tokens)."
+                  },
+                  "status": "Unauthorized",
+                  "code": 401,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": false,\n  \"message\": \"Unauthorized\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "DELETE /me/platforms/:platform",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/platforms/tiktok",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "platforms",
+                    "tiktok"
+                  ]
+                },
+                "description": "Path: `platform` = `tiktok` | `facebook`. Disconnect stored tokens."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "DELETE",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/platforms/tiktok",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "platforms",
+                        "tiktok"
+                      ]
+                    },
+                    "description": "Path: `platform` = `tiktok` | `facebook`. Disconnect stored tokens."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+                }
+              ]
+            }
+          ],
+          "description": "Creator only — `src/routes/creator/me-platforms.routes.ts` (mounted at `/me/platforms`)."
+        }
+      ],
+      "description": "**Creator JWT** (`Bearer {{creatorBearerToken}}`). Routers: `src/routes/creator/campaign.routes.ts`, `src/routes/creator/submissions.routes.ts`, `src/routes/creator/oauth.routes.ts` (`creator/index.ts`)."
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "POST /webhooks/xendit (invoice paid)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-callback-token",
+                "value": "{{xCallbackToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"inv_example\",\n  \"external_id\": \"fund_44444444-4444-4444-8444-444444444444\",\n  \"status\": \"PAID\",\n  \"paid_amount\": 10000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/xendit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "xendit"
+              ]
+            },
+            "description": "Invoice path: `external_id` prefix `fund_`, status PAID."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-callback-token",
+                    "value": "{{xCallbackToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"inv_example\",\n  \"external_id\": \"fund_44444444-4444-4444-8444-444444444444\",\n  \"status\": \"PAID\",\n  \"paid_amount\": 10000\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/webhooks/xendit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "webhooks",
+                    "xendit"
+                  ]
+                },
+                "description": "Invoice path: `external_id` prefix `fund_`, status PAID."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"received\": true\n  }\n}"
+            },
+            {
+              "name": "403 Forbidden",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-callback-token",
+                    "value": "{{xCallbackToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"inv_example\",\n  \"external_id\": \"fund_44444444-4444-4444-8444-444444444444\",\n  \"status\": \"PAID\",\n  \"paid_amount\": 10000\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/webhooks/xendit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "webhooks",
+                    "xendit"
+                  ]
+                },
+                "description": "Invoice path: `external_id` prefix `fund_`, status PAID."
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Forbidden\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /webhooks/xendit (payout succeeded)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-callback-token",
+                "value": "{{xCallbackToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"po_example\",\n  \"status\": \"SUCCEEDED\",\n  \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n  \"fee_amount\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/xendit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "xendit"
+              ]
+            },
+            "description": "Payout path: `reference_id` = submission UUID."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-callback-token",
+                    "value": "{{xCallbackToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"po_example\",\n  \"status\": \"SUCCEEDED\",\n  \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n  \"fee_amount\": 10\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/webhooks/xendit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "webhooks",
+                    "xendit"
+                  ]
+                },
+                "description": "Payout path: `reference_id` = submission UUID."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"received\": true\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Xendit server-to-server. **`x-callback-token`** header."
+    },
+    {
+      "name": "Uploads",
+      "item": [
+        {
+          "name": "POST /uploads/presign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{brandBearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"purpose\": \"campaign_cover\",\n  \"contentType\": \"image/jpeg\",\n  \"campaignId\": \"{{campaignId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/uploads/presign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "uploads",
+                "presign"
+              ]
+            },
+            "description": "Body: purpose (brand_logo | campaign_cover), contentType, campaignId when campaign_cover. Returns uploadUrl + headers for PUT."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"purpose\": \"campaign_cover\",\n  \"contentType\": \"image/jpeg\",\n  \"campaignId\": \"{{campaignId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/uploads/presign",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "uploads",
+                    "presign"
+                  ]
+                },
+                "description": "Body: purpose (brand_logo | campaign_cover), contentType, campaignId when campaign_cover. Returns uploadUrl + headers for PUT."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"uploadUrl\": \"https://11111111111111111111111111111111.r2.cloudflarestorage.com/vidu-bucket/campaigns/11111111-1111-4111-8111-111111111111/covers/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=\\u2026\",\n    \"objectKey\": \"campaigns/{{campaignId}}/covers/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg\",\n    \"publicUrl\": \"https://cdn.example.com/campaigns/{{campaignId}}/covers/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jpg\",\n    \"method\": \"PUT\",\n    \"expiresIn\": 900,\n    \"maxBytes\": 15728640,\n    \"headers\": {\n      \"Content-Type\": \"image/jpeg\"\n    }\n  }\n}"
+            },
+            {
+              "name": "503 Not configured",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{brandBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"purpose\": \"campaign_cover\",\n  \"contentType\": \"image/jpeg\",\n  \"campaignId\": \"{{campaignId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/uploads/presign",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "uploads",
+                    "presign"
+                  ]
+                },
+                "description": "Body: purpose (brand_logo | campaign_cover), contentType, campaignId when campaign_cover. Returns uploadUrl + headers for PUT."
+              },
+              "status": "Service Unavailable",
+              "code": 503,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Object storage is not configured (R2_S3_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "R2-compatible **presigned `PUT`**. **Brand JWT** only. Requires `R2_*` env; see `docs/environment.md`."
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "POST /admin/reconcile-campaign/:campaignId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/reconcile-campaign/{{campaignId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reconcile-campaign",
+                "{{campaignId}}"
+              ]
+            },
+            "description": "**Purpose:** Repair denormalized campaign budget fields from the ledger after data fixes or drift.\n\n**Behavior:** Reads all `ledger_entry` rows for the campaign, aggregates by type, then updates the campaign: `grossBudget` = sum(**deposit**) − sum(**refund_available**); `spentBudget` = sum(**release**). Returns those amounts as decimal strings (PHP, two fractional digits). **Note:** **adjustment** rows are not included in this recompute—only the three types above—so cached `grossBudget` may differ from campaign reality if manual adjustments exist.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID (route param `id` on the server)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reconcile-campaign/{{campaignId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reconcile-campaign",
+                    "{{campaignId}}"
+                  ]
+                },
+                "description": "**Purpose:** Repair denormalized campaign budget fields from the ledger after data fixes or drift.\n\n**Behavior:** Reads all `ledger_entry` rows for the campaign, aggregates by type, then updates the campaign: `grossBudget` = sum(**deposit**) − sum(**refund_available**); `spentBudget` = sum(**release**). Returns those amounts as decimal strings (PHP, two fractional digits). **Note:** **adjustment** rows are not included in this recompute—only the three types above—so cached `grossBudget` may differ from campaign reality if manual adjustments exist.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID (route param `id` on the server)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"grossBudget\": \"10000.00\",\n    \"spentBudget\": \"496.00\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /admin/campaigns/:campaignId/ledger/adjust",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountGross\": \"100.00\",\n  \"note\": \"manual test\",\n  \"idempotencyKey\": \"adjust:test-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/campaigns/{{campaignId}}/ledger/adjust",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campaigns",
+                "{{campaignId}}",
+                "ledger",
+                "adjust"
+              ]
+            },
+            "description": "**Purpose:** Record a manual **adjustment** on the campaign ledger (corrections, goodwill credits, etc.) and bump the campaign’s cached `grossBudget` by the same signed gross amount.\n\n**Behavior:** In one transaction, creates a `ledger_entry` with `ledgerType` **adjustment** (`amountGross`, `note`, `idempotencyKey`) and **increments** `campaign.grossBudget` by `amountGross`. Amounts are decimal strings in PHP (two fractional digits) like the rest of the API.\n\n**Idempotency:** If a ledger row already exists with the same `idempotencyKey`, the handler returns **200** with `data: { \"duplicate\": true }` and does **not** apply the adjustment again.\n\n**Body (JSON):**\n- `amountGross` (string, required)\n- `note` (string, required) — audit trail text\n- `idempotencyKey` (string, required) — unique key for this adjustment\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amountGross\": \"100.00\",\n  \"note\": \"manual test\",\n  \"idempotencyKey\": \"adjust:test-1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/campaigns/{{campaignId}}/ledger/adjust",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "ledger",
+                    "adjust"
+                  ]
+                },
+                "description": "**Purpose:** Record a manual **adjustment** on the campaign ledger (corrections, goodwill credits, etc.) and bump the campaign’s cached `grossBudget` by the same signed gross amount.\n\n**Behavior:** In one transaction, creates a `ledger_entry` with `ledgerType` **adjustment** (`amountGross`, `note`, `idempotencyKey`) and **increments** `campaign.grossBudget` by `amountGross`. Amounts are decimal strings in PHP (two fractional digits) like the rest of the API.\n\n**Idempotency:** If a ledger row already exists with the same `idempotencyKey`, the handler returns **200** with `data: { \"duplicate\": true }` and does **not** apply the adjustment again.\n\n**Body (JSON):**\n- `amountGross` (string, required)\n- `note` (string, required) — audit trail text\n- `idempotencyKey` (string, required) — unique key for this adjustment\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+            },
+            {
+              "name": "200 duplicate",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amountGross\": \"100.00\",\n  \"note\": \"manual test\",\n  \"idempotencyKey\": \"adjust:test-1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/campaigns/{{campaignId}}/ledger/adjust",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "campaigns",
+                    "{{campaignId}}",
+                    "ledger",
+                    "adjust"
+                  ]
+                },
+                "description": "**Purpose:** Record a manual **adjustment** on the campaign ledger (corrections, goodwill credits, etc.) and bump the campaign’s cached `grossBudget` by the same signed gross amount.\n\n**Behavior:** In one transaction, creates a `ledger_entry` with `ledgerType` **adjustment** (`amountGross`, `note`, `idempotencyKey`) and **increments** `campaign.grossBudget` by `amountGross`. Amounts are decimal strings in PHP (two fractional digits) like the rest of the API.\n\n**Idempotency:** If a ledger row already exists with the same `idempotencyKey`, the handler returns **200** with `data: { \"duplicate\": true }` and does **not** apply the adjustment again.\n\n**Body (JSON):**\n- `amountGross` (string, required)\n- `note` (string, required) — audit trail text\n- `idempotencyKey` (string, required) — unique key for this adjustment\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"duplicate\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /admin/submissions/:submissionId/force-reject",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/submissions/{{submissionId}}/force-reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "submissions",
+                "{{submissionId}}",
+                "force-reject"
+              ]
+            },
+            "description": "**Purpose:** Support / moderation escape hatch to mark a creator submission **rejected** immediately, without going through the normal brand review flow.\n\n**Behavior:** Updates the submission to `status: \"rejected\"` and sets `rejectionReason` to **`admin_force`** so downstream reporting can distinguish admin actions.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `submissionId` = submission UUID. **Body:** none."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/submissions/{{submissionId}}/force-reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "submissions",
+                    "{{submissionId}}",
+                    "force-reject"
+                  ]
+                },
+                "description": "**Purpose:** Support / moderation escape hatch to mark a creator submission **rejected** immediately, without going through the normal brand review flow.\n\n**Behavior:** Updates the submission to `status: \"rejected\"` and sets `rejectionReason` to **`admin_force`** so downstream reporting can distinguish admin actions.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `submissionId` = submission UUID. **Body:** none."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"ok\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /admin/audit/campaign/:campaignId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit/campaign/{{campaignId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit",
+                "campaign",
+                "{{campaignId}}"
+              ]
+            },
+            "description": "**Purpose:** Read-only **audit / investigation** bundle for a single campaign—useful when reconciling money, tracing ledger history, or reviewing all submissions in one call.\n\n**Behavior:** Loads the **campaign** row (404 if missing), all **ledger** entries for that campaign ordered **oldest → newest**, and **all submissions** tied to the campaign.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/audit/campaign/{{campaignId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "audit",
+                    "campaign",
+                    "{{campaignId}}"
+                  ]
+                },
+                "description": "**Purpose:** Read-only **audit / investigation** bundle for a single campaign—useful when reconciling money, tracing ledger history, or reviewing all submissions in one call.\n\n**Behavior:** Loads the **campaign** row (404 if missing), all **ledger** entries for that campaign ordered **oldest → newest**, and **all submissions** tied to the campaign.\n\n**Auth:** Folder HTTP Basic (`ADMIN_BASIC_*`).\n\n**Path:** `campaignId` = campaign UUID."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"campaign\": {\n      \"id\": \"{{campaignId}}\",\n      \"title\": \"Summer UGC push\"\n    },\n    \"ledger\": [],\n    \"submissions\": [\n      {\n        \"id\": \"{{submissionId}}\",\n        \"campaignId\": \"{{campaignId}}\",\n        \"normalizedUrl\": \"tiktok:https://www.tiktok.com/@user/video/123\",\n        \"platform\": \"tiktok\",\n        \"viewsLocked\": \"12400\",\n        \"fundedViews\": \"12400\",\n        \"grossAmount\": \"496.00\",\n        \"creatorNet\": \"396.80\",\n        \"partialReason\": null,\n        \"status\": \"pending\",\n        \"submittedAt\": \"2026-05-14T11:30:00.000Z\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Operator-only routes under `/admin` protected by **HTTP Basic** auth (`ADMIN_BASIC_USER`, default `admin`, and `ADMIN_BASIC_PASSWORD`). Set collection variables **`adminUsername`** / **`adminPassword`** to match the server.\n\n**Endpoints:** **Reconcile** refreshes cached campaign budgets from deposit/refund/release ledger sums. **Ledger adjust** appends a manual adjustment and bumps `grossBudget` (idempotent by `idempotencyKey`). **Force reject** sets a submission to rejected with reason `admin_force`. **Audit** returns campaign + ledger + submissions for investigation.",
+      "auth": {
+        "type": "basic",
+        "basic": [
+          {
+            "key": "username",
+            "value": "{{adminUsername}}",
+            "type": "string"
+          },
+          {
+            "key": "password",
+            "value": "{{adminPassword}}",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001"
+    },
+    {
+      "key": "brandBearerToken",
+      "value": ""
+    },
+    {
+      "key": "creatorBearerToken",
+      "value": ""
+    },
+    {
+      "key": "bearerToken",
+      "value": ""
+    },
+    {
+      "key": "campaignId",
+      "value": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "key": "submissionId",
+      "value": "22222222-2222-4222-8222-222222222222"
+    },
+    {
+      "key": "paymentMethodId",
+      "value": "55555555-5555-4555-8555-555555555555"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin"
+    },
+    {
+      "key": "adminPassword",
+      "value": ""
+    },
+    {
+      "key": "xCallbackToken",
+      "value": ""
+    }
+  ]
+}

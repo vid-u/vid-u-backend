@@ -1,0 +1,52 @@
+---
+description: Controller vs service roles, boundaries, and service naming
+globs: src/controllers/**/*.ts,src/services/**/*.ts
+alwaysApply: false
+---
+
+# Controllers and services
+
+Use with **`layered-express-modules.mdc`** (directory map, `sendSuccess`, `AppError`, Zod). This rule is the **mental model** and **naming** for the HTTP layer vs domain layer.
+
+## Roles
+
+| | **Controller** (“traffic cop”) | **Service** (“chef”) |
+| --- | --- | --- |
+| **Job** | HTTP only: parse context, call one service, format response | Business rules, workflows, Prisma/vendor I/O |
+| **Input** | `req` (after `validate*`), `req.authUser` / `req.dbUser` | Plain typed objects (`userId`, DTOs, options) |
+| **Output** | `sendSuccess` / throw `AppError` | Domain data or side effects; **no** `Request`/`Response` |
+| **Reuse** | One route shape | Controllers, workers, webhooks, scripts |
+| **Tests** | Often integration | Unit-test friendly (no HTTP mock) |
+
+## Controller checklist
+
+- Thin: **no Prisma** unless the team explicitly allows a trivial read (default: **services own DB**).
+- **Throw** typed errors for expected failures; avoid ad hoc `res.status(...).json(...)` for business cases so **`errorHandler`** stays the single error shape.
+- Transport-only steps stay here or in middleware (e.g. webhook signature verification, redirects) even if they are not “business rules.”
+
+## Service checklist
+
+- **Named exports**, `async function` per use case (or a small cohesive group).
+- **Explicit** Prisma `create`/`update` fields—never spread raw client bodies into DB calls (**`security-auth-prisma.mdc`**).
+
+## Service file naming
+
+- Name files for **domain**, not the URL prefix. Example: authenticated “self” flows mounted under `/me` use **`session-user`**, **`session-profile`**, **`user-analytics`**—not **`me-*`**, which reads like a route segment and ages poorly if routes change.
+- HTTP routes may still be `/me/...`; only **service filenames** avoid the `me-` prefix.
+
+## Quick examples
+
+```typescript
+// Controller — wire HTTP to service (after validateBody)
+export async function patchMe(req: Request, res: Response): Promise<void> {
+  const data = await patchMeUser(req.dbUser!.id, req.body);
+  sendSuccess(res, data);
+}
+```
+
+```typescript
+// Service — no req/res; lives in e.g. session-user.service.ts
+export async function patchMeUser(userId: string, body: PatchMeBodyDto) {
+  // prisma, rules, throw ConflictError / …
+}
+```

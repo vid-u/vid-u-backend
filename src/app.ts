@@ -1,3 +1,4 @@
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -44,6 +45,7 @@ export function createApp(): express.Application {
   app.set("trust proxy", 1);
 
   app.use(helmet());
+  app.use(cookieParser());
   app.use(
     cors({
       origin: (origin, callback) => {

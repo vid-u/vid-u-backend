@@ -1,0 +1,102 @@
+---
+alwaysApply: true
+---
+
+## How to use this list
+
+These items describe **common auth mistakes** and the **secure default** most teams want. They are **not** blanket rules that must never be violated in every codebase.
+
+- **Prefer** the guidance below for anything security-sensitive (auth, sessions, tokens, roles, production secrets).
+- **It is OK to diverge** when you have a clear threat model, product constraint, or existing architecture that justifies a different choice. When you do, treat it as a deliberate tradeoff (document it in code or ADR if non-obvious).
+- **Do not** treat this file as “always avoid X” without reasoning. **Do** use it as a checklist: if you ship something that matches a pitfall here, you should know _why_ that is acceptable in your context.
+
+---
+
+1/ storing JWTs in localStorage
+
+> XSS attack = every token on the page stolen
+> localStorage is readable by any script on your site
+> use httpOnly cookies instead
+
+2/ JWT signed with a weak or default secret
+
+> "secret" and "your_jwt_secret_here" are tested first by attackers
+> if its from a tutorial, assume its already compromised
+> generate a proper 256-bit random secret
+
+3/ no refresh token rotation
+
+> stolen refresh token works forever without rotation
+> rotate on every use, invalidate the old one immediately
+> one-line config in most auth libraries
+
+4/ no account lockout after failed logins
+
+> brute force has zero friction without it
+> 10 failed attempts should lock the account
+> add lockout + exponential backoff
+
+5/ auth middleware applied inconsistently
+
+> AI generates middleware for some routes and skips others
+> the skipped ones are completely open
+> audit every endpoint manually, assume nothing is protected
+
+6/ different error messages for wrong email vs wrong password
+
+> "user not found" vs "wrong password" tells attackers which emails exist
+> return the same generic message for both cases
+> never confirm or deny account existence
+
+7/ forgot-password tokens that never expire
+
+> a reset link from 3 months ago should be invalid
+> yours probably isnt
+> set a short expiry, 15 to 60 minutes max
+
+8/ OAuth redirect_uri not validated
+
+> exploited to redirect auth codes to attacker-> controlled URLs
+> whitelist every valid redirect URI explicitly
+> never allow open redirects in your OAuth flow
+
+9/ no email verification on signup
+
+> fake accounts and spam at zero friction
+> verify before granting full access
+> a verification link, not just a welcome email
+
+10/ sessions not invalidated server-side on logout
+
+> cookie is cleared client-side but server-side session still works
+> invalidate the session record in your DB on logout
+> client-side clearing alone is not enough
+
+11/ passwords stored without bcrypt or argon2
+
+> MD5, SHA256 without salt, plain text
+> all of these show up in breach headlines
+> bcrypt or argon2 only, no exceptions
+
+12/ auth endpoints not enforcing HTTPS
+
+> credentials over HTTP are visible on any network
+> enforce HTTPS at the infrastructure level
+> no HTTP fallback for any auth route
+
+13/ client-side role checks instead of server-side
+
+> you can't trust what the frontend says about who the user is
+> validate roles and permissions on every server request
+> the frontend is UI, not security
+
+14/ no 2FA on admin or sensitive routes
+
+> one breached password = full access to everything
+> add TOTP or magic link 2FA on admin routes minimum
+> non-negotiable for anything handling user data
+
+15/ test credentials left in production
+
+> admin:admin or test@test.com:password123 are real entry points, not conveniences
+> audit and remove every test account before you ship

@@ -1,6 +1,8 @@
-import type { User } from "../generated/prisma/client.js";
+import type { Prisma } from "../generated/prisma/client.js";
 
 export {};
+
+type DbUserWithRoles = Prisma.UserGetPayload<{ include: { roleProfiles: true } }>;
 
 declare global {
   namespace Express {
@@ -8,8 +10,11 @@ declare global {
       authUser?: {
         id: string;
         email?: string;
+        role: "brand" | "creator" | null;
+        jwtRoleHint?: string;
       };
-      dbUser?: User;
+      bearerToken?: string;
+      dbUser?: DbUserWithRoles;
     }
   }
 }

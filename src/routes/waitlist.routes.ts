@@ -11,5 +11,5 @@ waitlistRouter.get("/", asyncHandler(waitlistController.getWaitlist));
 waitlistRouter.post(
   "/",
   validateBody(waitlistBody),
-  asyncHandler(waitlistController.postWaitlist)
+  asyncHandler(waitlistController.postWaitlist),
 );

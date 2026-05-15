@@ -1,10 +1,9 @@
 ---
 alwaysApply: false
 ---
-
 # Layered modules (routes → controllers → services)
 
-Use this layout as the **default** for new HTTP surface area. It matches the proven pattern from prior Express backends (thin HTTP layer, Zod at the edge, services own business rules). Stack-specific concerns stay in **`express-http-app.mdc`**, **`security-auth-prisma.mdc`**, and related rules—this file is **structure and responsibility boundaries** only.
+Use this layout as the **default** for new HTTP surface area. It matches the proven pattern from prior Express backends (thin HTTP layer, Zod at the edge, services own business rules). For the controller vs service mental model and **service naming** (avoid `me-*` filenames), see **`controllers-and-services.mdc`**. Stack-specific concerns stay in **`express-http-app.mdc`**, **`security-auth-prisma.mdc`**, and related rules—this file is **structure and responsibility boundaries** only.
 
 ## Directory map
 
@@ -20,7 +19,7 @@ Use this layout as the **default** for new HTTP surface area. It matches the pro
 | Utils         | `src/utils/*.ts`                                     | **`asyncHandler`**, **`api-response`**, **`errors`**, formatting helpers        |
 | Lib           | `src/lib/*.ts`                                       | Singleton clients (`prisma`, `env`), no route-specific rules                    |
 
-When a domain grows large, **nested route folders** (e.g. `routes/client/`, `routes/admin/`) stay under `routes/`; keep **one router file per concern** and compose in **`api.routes.ts`** (or equivalent root router).
+When a domain grows large, **nested route folders** (e.g. `routes/brand/`, `routes/creator/` — same idea as BugHyve `routes/client/`, `routes/tester/`; shared routers stay in **`routes/`** root) stay under `routes/`; keep **one router file per concern** and compose in **`api.routes.ts`** with section comments (**Shared**, **Brand**, **Creator**).
 
 ## Routes
 
@@ -42,7 +41,7 @@ When a domain grows large, **nested route folders** (e.g. `routes/client/`, `rou
 
 ## Services
 
-- **Named exports**, **`async function`** per use case (or small cohesive group). Avoid default exports for services.
+- **Named exports**, **`async function`** per use case (or small cohesive group). Avoid default exports for services. Prefer **domain-based filenames** (see **`controllers-and-services.mdc`**), not HTTP path crumbs like `me-*.service.ts`.
 - Accept **plain input objects** typed in **`src/types/*.types.ts`** (e.g. `SyncUserInput = SyncBodyDto & { authUserId: string }`) so callers cannot forget context fields.
 - **Throw domain errors** (`ConflictError`, `NotFoundError`, …) for business outcomes; reserve bare **`Error`** for truly unexpected bugs (they become 500s).
 - **No `Request` / `Response`** types in services—keeps them testable and reusable from jobs/scripts later.
