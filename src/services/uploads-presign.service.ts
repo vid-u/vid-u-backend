@@ -15,7 +15,7 @@ const extByContentType: Record<PresignUploadBodyDto["contentType"], string> = {
 
 let s3Client: S3Client | undefined;
 
-function r2Configured(): boolean {
+export function r2Configured(): boolean {
   return Boolean(
     env.R2_S3_ENDPOINT &&
       env.R2_BUCKET &&
@@ -24,7 +24,7 @@ function r2Configured(): boolean {
   );
 }
 
-function getS3Client(): S3Client {
+export function getS3Client(): S3Client {
   if (!r2Configured()) {
     throw new AppError(
       "Object storage is not configured (R2_S3_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)",

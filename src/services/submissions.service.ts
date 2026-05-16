@@ -1,5 +1,5 @@
 import { Prisma } from "../generated/prisma/client.js";
-import type { Platform } from "../generated/prisma/enums.js";
+import { LedgerType, type Platform } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import {
   ConflictError,
@@ -12,6 +12,8 @@ import { grossFromFundedViews, creatorNetFromGross, toDecimal, netBudgetFromGros
 import { CREATOR_PAYOUT_SHARE } from "../config/fees.js";
 import { channelLimits } from "../config/xendit_channel_limits.js";
 import { maybeAutoPauseCampaign } from "./auto-pause.service.js";
+import { pendingRefundNetFromAttempt } from "./brand-refund.service.js";
+import { BRAND_REFUND_LEDGER_NOTE } from "./xendit-payout.service.js";
 import {
   fetchCreatorContentStats,
   normalizeContentUrl,
@@ -22,9 +24,11 @@ import {
 } from "./submission-preview-cache.service.js";
 import type {
   ListBrandCampaignSubmissionsQueryDto,
+  ListBrandRecentSubmissionsQueryDto,
   ListMeSubmissionsQueryDto,
   SubmissionPreviewBodyDto,
 } from "../validation/submissions.schema.js";
+import { contentUrlFromNormalized } from "./platform-content.service.js";
 
 export async function requireCreatorDefaultPayoutMethod(creatorUserId: string) {
   const defaultPm = await prisma.paymentMethod.findFirst({
@@ -141,7 +145,28 @@ export async function confirmSubmission(
     });
     const reserved = agg._sum?.grossAmount ?? new Prisma.Decimal(0);
     const net = netBudgetFromGross(campaign.grossBudget);
-    const available = net.sub(campaign.spentBudget).sub(reserved);
+    let pendingRefundNet = toDecimal(0);
+    const pendingRefundAttempt = await tx.ledgerEntry.findFirst({
+      where: {
+        campaignId,
+        ledgerType: LedgerType.release_attempt,
+        note: `${BRAND_REFUND_LEDGER_NOTE}_pending`,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (pendingRefundAttempt?.xenditPayoutId) {
+      const refundSettled = await tx.ledgerEntry.findFirst({
+        where: {
+          campaignId,
+          xenditPayoutId: pendingRefundAttempt.xenditPayoutId,
+          ledgerType: { in: [LedgerType.refund_available, LedgerType.release_failed] },
+        },
+      });
+      if (!refundSettled) {
+        pendingRefundNet = pendingRefundNetFromAttempt(pendingRefundAttempt);
+      }
+    }
+    const available = net.sub(campaign.spentBudget).sub(reserved).sub(pendingRefundNet);
     const rate = campaign.ratePer1k;
 
     let gross = grossFromFundedViews(fundedViews, rate);
@@ -195,6 +220,34 @@ export async function confirmSubmission(
   return submission;
 }
 
+const brandSubmissionListInclude = {
+  campaign: { select: { id: true, title: true } },
+  creator: { select: { id: true, name: true, avatarUrl: true } },
+} as const;
+
+function mapBrandSubmissionListItem(
+  s: Prisma.SubmissionGetPayload<{ include: typeof brandSubmissionListInclude }>,
+) {
+  return {
+    id: s.id,
+    campaignId: s.campaignId,
+    campaignTitle: s.campaign.title,
+    creatorId: s.creatorUserId,
+    creatorName: s.creator.name ?? "Creator",
+    creatorAvatarUrl: s.creator.avatarUrl,
+    normalizedUrl: s.normalizedUrl,
+    postUrl: contentUrlFromNormalized(s.normalizedUrl, s.platform),
+    platform: s.platform,
+    viewsLocked: s.viewsLocked.toString(),
+    fundedViews: s.fundedViews.toString(),
+    grossAmount: s.grossAmount.toFixed(2),
+    creatorNet: s.creatorNet.toFixed(2),
+    partialReason: s.partialReason,
+    status: s.status,
+    submittedAt: s.submittedAt.toISOString(),
+  };
+}
+
 export async function listBrandCampaignSubmissionsForUser(
   brandUserId: string,
   campaignId: string,
@@ -206,20 +259,46 @@ export async function listBrandCampaignSubmissionsForUser(
   const where: Prisma.SubmissionWhereInput = { campaignId };
   if (q.status) where.status = q.status;
 
-  const items = await prisma.submission.findMany({ where, orderBy: { submittedAt: "desc" } });
+  const items = await prisma.submission.findMany({
+    where,
+    orderBy: { submittedAt: "desc" },
+    include: brandSubmissionListInclude,
+  });
   return {
-    items: items.map((s) => ({
-      id: s.id,
-      campaignId: s.campaignId,
-      normalizedUrl: s.normalizedUrl,
-      platform: s.platform,
-      viewsLocked: s.viewsLocked.toString(),
-      fundedViews: s.fundedViews.toString(),
-      creatorNet: s.creatorNet.toFixed(2),
-      partialReason: s.partialReason,
-      status: s.status,
-      submittedAt: s.submittedAt.toISOString(),
-    })),
+    items: items.map(mapBrandSubmissionListItem),
+  };
+}
+
+/** Recent submissions for brand dashboard (all campaigns, paginated). */
+export async function listBrandRecentSubmissionsForUser(
+  brandUserId: string,
+  q: ListBrandRecentSubmissionsQueryDto,
+) {
+  const page = q.page;
+  const limit = q.limit;
+  const skip = (page - 1) * limit;
+
+  const where: Prisma.SubmissionWhereInput = {
+    campaign: { brandUserId },
+    ...(q.status
+      ? { status: q.status }
+      : { status: { in: ["pending", "rejected"] } }),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.submission.findMany({
+      where,
+      orderBy: { submittedAt: "desc" },
+      skip,
+      take: limit,
+      include: brandSubmissionListInclude,
+    }),
+    prisma.submission.count({ where }),
+  ]);
+
+  return {
+    items: items.map(mapBrandSubmissionListItem),
+    meta: buildPaginationMeta(page, limit, total),
   };
 }
 

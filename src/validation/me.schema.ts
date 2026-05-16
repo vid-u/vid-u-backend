@@ -28,3 +28,14 @@ export const mePlatformPathParamsSchema = z
   .strict();
 
 export type MePlatformPathParamsDto = z.infer<typeof mePlatformPathParamsSchema>;
+
+export const analyticsGranularitySchema = z.enum(["monthly", "yearly"]);
+
+export const getMeAnalyticsQuerySchema = z
+  .object({
+    granularity: analyticsGranularitySchema,
+  })
+  .strict();
+
+export type GetMeAnalyticsQueryDto = z.infer<typeof getMeAnalyticsQuerySchema>;
+export type AnalyticsGranularity = z.infer<typeof analyticsGranularitySchema>;

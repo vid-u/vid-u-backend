@@ -3,6 +3,7 @@ import { paramString } from "../lib/params.js";
 import { sendSuccess } from "../utils/api-response.js";
 import type {
   ListBrandCampaignSubmissionsQueryDto,
+  ListBrandRecentSubmissionsQueryDto,
   ListMeSubmissionsQueryDto,
   SubmissionPreviewBodyDto,
 } from "../validation/submissions.schema.js";
@@ -33,6 +34,12 @@ export async function listCampaignSubmissions(req: Request, res: Response): Prom
     req.query as ListBrandCampaignSubmissionsQueryDto,
   );
   sendSuccess(res, data);
+}
+
+export async function listBrandRecentSubmissions(req: Request, res: Response): Promise<void> {
+  const q = req.query as unknown as ListBrandRecentSubmissionsQueryDto;
+  const { items, meta } = await submissions.listBrandRecentSubmissionsForUser(req.dbUser!.id, q);
+  sendSuccess(res, { items }, "ok", 200, meta);
 }
 
 export async function listMeSubmissions(req: Request, res: Response): Promise<void> {

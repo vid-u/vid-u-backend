@@ -76,6 +76,7 @@ export function createApp(): express.Application {
         callback(null, false);
       },
       credentials: true,
+      exposedHeaders: ["Location"],
     }),
   );
   app.use(express.json({ limit: "2mb" }));

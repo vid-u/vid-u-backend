@@ -20,22 +20,16 @@ export function errorHandler(
     return;
   }
 
+  const detail = err instanceof Error ? err.message : String(err);
   logger.error("Unhandled error", {
-    error: err instanceof Error ? err.message : String(err),
+    error: detail,
     stack: err instanceof Error ? err.stack : undefined,
     path: req.path,
     method: req.method,
   });
 
-  const message =
-    process.env.NODE_ENV === "production"
-      ? "Internal server error"
-      : err instanceof Error
-        ? err.message
-        : "Internal server error";
-
   res.status(500).json({
     success: false,
-    message,
+    message: "Something went wrong. Please try again.",
   });
 }

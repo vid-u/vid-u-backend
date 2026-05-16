@@ -6,6 +6,7 @@ import {
   brandRejectSubmissionParamsSchema,
   campaignIdParamsSchema,
   listBrandCampaignSubmissionsQuerySchema,
+  listBrandRecentSubmissionsQuerySchema,
 } from "../../validation/index.js";
 import * as brands from "../../controllers/brands-campaigns.controller.js";
 import * as subs from "../../controllers/submissions.controller.js";
@@ -15,6 +16,11 @@ import * as subs from "../../controllers/submissions.controller.js";
  */
 export const brandSubmissionsRouter = Router();
 
+brandSubmissionsRouter.get(
+  "/submissions",
+  validateQuery(listBrandRecentSubmissionsQuerySchema),
+  asyncHandler(subs.listBrandRecentSubmissions),
+);
 brandSubmissionsRouter.get(
   "/campaigns/:id/submissions",
   validateParams(campaignIdParamsSchema),

@@ -1,8 +1,7 @@
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
--- CreateEnum
-CREATE TYPE "WaitlistRole" AS ENUM ('brand', 'creator');
+-- WaitlistRole enum and waitlist table: created by migration 20260211100000_vid_u_waitlist_only
 
 -- CreateEnum
 CREATE TYPE "user_role_enum" AS ENUM ('creator', 'brand');
@@ -33,17 +32,6 @@ CREATE TYPE "ledger_type_enum" AS ENUM ('deposit', 'release_attempt', 'release',
 
 -- CreateEnum
 CREATE TYPE "session_status_enum" AS ENUM ('pending', 'paid', 'expired', 'failed');
-
--- CreateTable
-CREATE TABLE "waitlist" (
-    "id" UUID NOT NULL,
-    "email" TEXT NOT NULL,
-    "role" "WaitlistRole" NOT NULL,
-    "notes" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "waitlist_pkey" PRIMARY KEY ("id")
-);
 
 -- CreateTable
 CREATE TABLE "user" (
@@ -202,9 +190,6 @@ CREATE TABLE "funding_checkout_session" (
 
     CONSTRAINT "funding_checkout_session_pkey" PRIMARY KEY ("id")
 );
-
--- CreateIndex
-CREATE UNIQUE INDEX "waitlist_email_key" ON "waitlist"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_email_key" ON "user"("email");

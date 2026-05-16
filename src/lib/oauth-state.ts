@@ -19,25 +19,39 @@ function stateSigningKey(): ReturnType<typeof createSecretKey> {
   return createSecretKey(Buffer.from("dev-vidu-oauth-state-key-32bytes!", "utf8"));
 }
 
-export async function signOAuthState(userId: string, platform: OAuthStatePlatform): Promise<string> {
+export type OAuthStatePayload = {
+  userId: string;
+  platform: OAuthStatePlatform;
+  /** TikTok PKCE code_verifier (embedded so HTTPS tunnel callbacks work without a cookie). */
+  codeVerifier?: string;
+};
+
+export async function signOAuthState(
+  userId: string,
+  platform: OAuthStatePlatform,
+  options?: { codeVerifier?: string },
+): Promise<string> {
   const key = stateSigningKey();
-  return new SignJWT({ sub: userId, p: platform })
+  const claims: Record<string, string> = { sub: userId, p: platform };
+  if (options?.codeVerifier) {
+    claims.cv = options.codeVerifier;
+  }
+  return new SignJWT(claims)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("15m")
     .sign(key);
 }
 
-export async function verifyOAuthState(
-  state: string | undefined,
-): Promise<{ userId: string; platform: OAuthStatePlatform } | null> {
+export async function verifyOAuthState(state: string | undefined): Promise<OAuthStatePayload | null> {
   if (!state) return null;
   try {
     const key = stateSigningKey();
     const { payload } = await jwtVerify(state, key, { algorithms: ["HS256"] });
     if (typeof payload.sub !== "string") return null;
     if (payload.p !== "tiktok" && payload.p !== "facebook") return null;
-    return { userId: payload.sub, platform: payload.p };
+    const codeVerifier = typeof payload.cv === "string" ? payload.cv : undefined;
+    return { userId: payload.sub, platform: payload.p, codeVerifier };
   } catch {
     return null;
   }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MIN_BRAND_RATE_PER_1K, MIN_GROSS_PUBLISH_PHP } from "../config/campaign-limits.js";
+import { MIN_BRAND_RATE_PER_1K, MIN_PUBLISH_PHP } from "../config/campaign-limits.js";
 
 const optionalUrlArray = z.array(z.string().url()).optional();
 const optionalUrlArrayOrNull = z.array(z.string().url()).nullable().optional();
@@ -9,7 +9,7 @@ export const createBrandCampaignBodySchema = z
     title: z.string().min(1),
     description: z.string(),
     ratePer1k: z.number().min(MIN_BRAND_RATE_PER_1K),
-    plannedGrossBudget: z.number().min(MIN_GROSS_PUBLISH_PHP),
+    plannedGrossBudget: z.number().min(MIN_PUBLISH_PHP),
     platforms: z.array(z.enum(["tiktok", "facebook"])).min(1),
     rules: z.array(z.string()).min(1),
     referenceLinks: optionalUrlArray,
@@ -27,6 +27,7 @@ export const patchBrandCampaignBodySchema = z
     description: z.string().optional(),
     platforms: z.array(z.enum(["tiktok", "facebook"])).min(1).optional(),
     ratePer1k: z.number().min(MIN_BRAND_RATE_PER_1K).optional(),
+    plannedGrossBudget: z.number().min(0).optional(),
     rules: z.array(z.string()).min(1).optional(),
     referenceLinks: optionalUrlArrayOrNull,
     assetUrls: optionalUrlArrayOrNull,
@@ -52,3 +53,12 @@ export const brandRejectSubmissionBodySchema = z
   .strict();
 
 export type BrandRejectSubmissionBodyDto = z.infer<typeof brandRejectSubmissionBodySchema>;
+
+export const brandCheckoutSyncParamsSchema = z
+  .object({
+    id: z.string().uuid(),
+    externalId: z.string().min(6).startsWith("fund_"),
+  })
+  .strict();
+
+export type BrandCheckoutSyncParamsDto = z.infer<typeof brandCheckoutSyncParamsSchema>;

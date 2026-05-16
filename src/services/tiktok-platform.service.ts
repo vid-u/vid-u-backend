@@ -19,7 +19,7 @@ export function assertTikTokConfigured(): void {
   }
 }
 
-export function buildTikTokAuthorizeUrl(state: string): string {
+export function buildTikTokAuthorizeUrl(state: string, codeChallenge: string): string {
   assertTikTokConfigured();
   const redirectUri = getTikTokRedirectUri();
   const scope = ["user.info.basic", "video.list"].join(",");
@@ -29,6 +29,8 @@ export function buildTikTokAuthorizeUrl(state: string): string {
   u.searchParams.set("response_type", "code");
   u.searchParams.set("redirect_uri", redirectUri);
   u.searchParams.set("state", state);
+  u.searchParams.set("code_challenge", codeChallenge);
+  u.searchParams.set("code_challenge_method", "S256");
   u.searchParams.set("disable_auto_auth", "1");
   return u.href;
 }
@@ -60,7 +62,10 @@ async function postTikTokToken(body: Record<string, string>): Promise<TikTokToke
   return json;
 }
 
-export async function exchangeTikTokCode(code: string): Promise<{
+export async function exchangeTikTokCode(
+  code: string,
+  codeVerifier: string,
+): Promise<{
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
@@ -72,6 +77,7 @@ export async function exchangeTikTokCode(code: string): Promise<{
     client_key: env.TIKTOK_CLIENT_KEY!,
     client_secret: env.TIKTOK_CLIENT_SECRET!,
     code,
+    code_verifier: codeVerifier,
     grant_type: "authorization_code",
     redirect_uri: getTikTokRedirectUri(),
   });

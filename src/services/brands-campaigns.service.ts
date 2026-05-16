@@ -3,10 +3,17 @@ import { Prisma } from "../generated/prisma/client.js";
 import type { CampaignStatus } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
-import { MIN_PUBLISH_FLOOR_PHP, PLATFORM_DEPOSIT_FEE_PERCENT } from "../config/fees.js";
+import { MIN_PUBLISH_SPENDABLE_FLOOR_PHP } from "../config/fees.js";
+import { computeCampaignBalances } from "./budget.service.js";
+import {
+  getPendingBrandRefundNet,
+  hasInFlightBrandRefund,
+  refundAvailableCampaignBalance as executeBrandRefund,
+} from "./brand-refund.service.js";
 import { netBudgetFromGross, toDecimal } from "../utils/money.js";
 import { maybeAutoPauseCampaign } from "./auto-pause.service.js";
-import { publicUrlFromObjectKey } from "../lib/publicObjectUrl.js";
+import { publicUrlFromObjectKey, resolveObjectDisplayUrl } from "../lib/publicObjectUrl.js";
+import { brandCampaignFundingRedirectUrl } from "../lib/frontendOrigin.js";
 import { createXenditInvoice } from "./xendit-invoice.service.js";
 import { processPayoutReleaseQueue } from "./payout-release.worker.js";
 import type {
@@ -49,14 +56,10 @@ async function computeCampaignDto(campaignId: string) {
     },
   });
   if (!c) return null;
-  let reserved = new Prisma.Decimal(0);
-  for (const s of c.submissions) {
-    reserved = reserved.add(s.grossAmount);
-  }
-  const netBudget = netBudgetFromGross(c.grossBudget);
-  const spent = c.spentBudget;
-  const available = netBudget.sub(spent).sub(reserved);
+  const pendingRefundNet = await getPendingBrandRefundNet(campaignId);
+  const balances = computeCampaignBalances(c, c.submissions, pendingRefundNet);
   const brandName = c.brand.brandProfile?.brandName ?? "";
+  const refundInProgress = pendingRefundNet.gt(0) || (await hasInFlightBrandRefund(campaignId));
   return {
     id: c.id,
     brandUserId: c.brandUserId,
@@ -64,7 +67,9 @@ async function computeCampaignDto(campaignId: string) {
     title: c.title,
     description: c.description,
     ratePer1k: decimalString(c.ratePer1k),
-    spentBudget: decimalString(spent),
+    grossBudget: balances.grossBudget,
+    spentBudget: balances.spentBudget,
+    plannedGrossBudget: decimalString(c.plannedGrossBudget),
     goalViews: c.goalViews.toString(),
     platforms: c.platforms,
     rules: c.rules,
@@ -72,10 +77,13 @@ async function computeCampaignDto(campaignId: string) {
     referenceLinks: c.referenceLinks,
     assetUrls: c.assetUrls,
     coverImageObjectKey: c.coverImageObjectKey,
-    coverImageUrl: publicUrlFromObjectKey(c.coverImageObjectKey),
-    netBudget: decimalString(netBudget),
-    reservedBudget: decimalString(reserved),
-    availableBudget: decimalString(available),
+    coverImageUrl: await resolveObjectDisplayUrl(c.coverImageObjectKey),
+    netBudget: balances.netBudget,
+    reservedBudget: balances.reservedBudget,
+    payoutPoolBudget: balances.payoutPoolBudget,
+    pendingRefundBudget: balances.pendingRefundBudget,
+    availableBudget: balances.availableBudget,
+    refundInProgress,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -128,7 +136,16 @@ export async function listBrandCampaignCardsForUser(brandUserId: string) {
       },
     },
   });
-  return rows.map(mapBrandCampaignCard);
+  const cards = rows.map(mapBrandCampaignCard);
+  return Promise.all(
+    cards.map(async (card) => {
+      if (card.coverImageUrl || !card.coverImageObjectKey) return card;
+      return {
+        ...card,
+        coverImageUrl: await resolveObjectDisplayUrl(card.coverImageObjectKey),
+      };
+    }),
+  );
 }
 
 export async function createBrandCampaignForUser(
@@ -136,13 +153,7 @@ export async function createBrandCampaignForUser(
   b: CreateBrandCampaignBodyDto,
 ): Promise<NonNullable<BrandCampaignDto>> {
   const rate = toDecimal(b.ratePer1k);
-  const netPool = new Prisma.Decimal(b.plannedGrossBudget).mul(
-    toDecimal(1 - PLATFORM_DEPOSIT_FEE_PERCENT),
-  );
-  const cpv = rate.div(toDecimal(1000));
-  const goalViewsNum =
-    cpv.gt(0) && netPool.gt(0) ? Math.max(0, Math.floor(Number(netPool.div(cpv).toString()))) : 0;
-  const goalViews = BigInt(goalViewsNum);
+  const plannedGross = toDecimal(b.plannedGrossBudget);
   const campaign = await prisma.campaign.create({
     data: {
       brandUserId,
@@ -151,7 +162,8 @@ export async function createBrandCampaignForUser(
       ratePer1k: rate,
       grossBudget: new Prisma.Decimal(0),
       spentBudget: new Prisma.Decimal(0),
-      goalViews,
+      plannedGrossBudget: plannedGross,
+      goalViews: 0n,
       platforms: b.platforms,
       rules: b.rules,
       status: "draft",
@@ -186,18 +198,27 @@ export async function createBrandCheckoutSession(
   if (c.status === "ended") throw new ConflictError("Campaign ended");
 
   const gross = new Prisma.Decimal(parsed.grossAmount);
+
+  /** After the campaign has any funded pool, further checkouts are always top-ups. */
+  const hasInitialFund = toDecimal(c.grossBudget).gt(0);
+  const intent = hasInitialFund ? "add_funds" : (parsed.intent ?? "add_funds");
+
   const externalId = `fund_${randomUUID()}`;
   const { invoiceId, invoiceUrl } = await createXenditInvoice({
     externalId,
     amount: gross,
     description: `Campaign ${c.title}`,
-    metadata: { campaignId, intent: parsed.intent ?? "add_funds" },
+    metadata: { campaignId, intent },
+    successRedirectUrl: brandCampaignFundingRedirectUrl(campaignId, "success"),
+    failureRedirectUrl: brandCampaignFundingRedirectUrl(campaignId, "failed"),
   });
 
   await prisma.fundingCheckoutSession.create({
     data: {
       campaignId,
       externalId,
+      xenditInvoiceId: invoiceId,
+      intent,
       checkoutUrl: invoiceUrl,
       status: "pending",
       grossAmount: gross,
@@ -291,33 +312,8 @@ export async function rejectBrandSubmission(
 export async function refundAvailableCampaignBalance(
   brandUserId: string,
   campaignId: string,
-): Promise<{ refunded: string }> {
-  const c = await prisma.campaign.findFirst({ where: { id: campaignId, brandUserId } });
-  if (!c) throw new NotFoundError("Campaign not found");
-  const dto = await computeCampaignDto(campaignId);
-  if (!dto) throw new NotFoundError("Campaign not found");
-  const available = new Prisma.Decimal(dto.availableBudget);
-  if (available.lte(0)) throw new ConflictError("No available balance");
-
-  const idem = `refund:${campaignId}:${Date.now()}`;
-  await prisma.$transaction(async (tx) => {
-    await tx.ledgerEntry.create({
-      data: {
-        campaignId,
-        ledgerType: "refund_available",
-        amountGross: available,
-        idempotencyKey: idem,
-        note: "brand_refund_available",
-      },
-    });
-    await tx.campaign.update({
-      where: { id: campaignId },
-      data: { grossBudget: { decrement: available } },
-    });
-  });
-  await maybeAutoPauseCampaign(campaignId);
-
-  return { refunded: decimalString(available) };
+): Promise<{ refunded: string; payoutId?: string }> {
+  return executeBrandRefund(brandUserId, campaignId);
 }
 
 export async function patchBrandCampaignForUser(
@@ -337,15 +333,16 @@ export async function patchBrandCampaignForUser(
 
   if (patch.status === "active") {
     const dto = await computeCampaignDto(id);
-    if (dto && new Prisma.Decimal(dto.availableBudget).lt(toDecimal(MIN_PUBLISH_FLOOR_PHP))) {
+    if (dto && new Prisma.Decimal(dto.availableBudget).lt(toDecimal(MIN_PUBLISH_SPENDABLE_FLOOR_PHP))) {
       throw new ConflictError("below_publish_floor");
     }
   }
 
   const nextRate =
     patch.ratePer1k !== undefined ? toDecimal(patch.ratePer1k) : toDecimal(c.ratePer1k);
+  const isFunded = toDecimal(c.grossBudget).gt(0);
   let nextGoalViews: bigint | undefined;
-  if (patch.ratePer1k !== undefined) {
+  if (patch.ratePer1k !== undefined && isFunded) {
     const netPool = netBudgetFromGross(c.grossBudget);
     const cpv = nextRate.div(toDecimal(1000));
     const goalViewsNum =
@@ -361,6 +358,9 @@ export async function patchBrandCampaignForUser(
       ...(patch.status ? { status: patch.status as CampaignStatus } : {}),
       ...(patch.platforms ? { platforms: patch.platforms } : {}),
       ...(patch.ratePer1k !== undefined ? { ratePer1k: nextRate } : {}),
+      ...(patch.plannedGrossBudget !== undefined
+        ? { plannedGrossBudget: toDecimal(patch.plannedGrossBudget) }
+        : {}),
       ...(nextGoalViews !== undefined ? { goalViews: nextGoalViews } : {}),
       ...(patch.rules ? { rules: patch.rules } : {}),
       ...(patch.referenceLinks !== undefined

@@ -70,7 +70,7 @@ export async function listPaymentMethodsForUser(
 ): Promise<ReturnType<typeof toPaymentMethodPublic>[]> {
   const rows = await prisma.paymentMethod.findMany({
     where: { userId, purpose },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    orderBy: { createdAt: "asc" },
     take: 50,
   });
   return rows.map(toPaymentMethodPublic);

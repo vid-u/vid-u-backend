@@ -25,14 +25,24 @@ Example production:
 - **`SUPABASE_JWKS_URL` (optional):** override the JWKS URL. Typical hosted Supabase projects need **neither** `SUPABASE_JWT_SECRET` nor `SUPABASE_JWKS_URL`.
 - Configure **redirect URLs** in Supabase for Google OAuth: allow `PUBLIC_API_URL` + `/auth/google/callback` (or your deployed API host).
 
+## Session cookie (SPA auth)
+
+- After email verify or Google OAuth, the API sets an **httpOnly** cookie `vidu_session` (Supabase JWT access token). The SPA must call the API with **`credentials: include`** (Axios `withCredentials: true`). CORS already uses `credentials: true` when `FRONTEND_URL` lists the SPA origin.
+- Cookie flags: **`httpOnly`**, **`secure` in production**, **`sameSite: lax`** by default. Override with optional `AUTH_COOKIE_SAME_SITE` (`lax` | `strict` | `none`; use `none` only if the SPA and API are on unrelated sites and you serve HTTPS).
+- `POST /auth/sign-out` clears the cookie. Tokens are **not** returned to the browser in JSON (except legacy Postman flows using `Authorization: Bearer`).
+
 ## Xendit
 
-- `XENDIT_SECRET_KEY`: **secret API key** for `api.xendit.co` (Basic auth) for invoices and payouts.
-- `XENDIT_WEBHOOK_TOKEN`: callback verification token; the API checks the `x-callback-token` header on `POST /webhooks/xendit`. Expose that route via **ngrok** or **cloudflared** when testing webhooks locally.
+- `XENDIT_SECRET_KEY`: **secret API key** for `api.xendit.co` (Basic auth) for invoices and payouts. **Without it**, `POST /brands/campaigns/:id/checkout` returns **503** with `success: false` and a message that Xendit is not configured (no checkout session is created).
+- `XENDIT_WEBHOOK_TOKEN`: callback verification token; the API checks the `x-callback-token` header on `POST /webhooks/xendit`. Expose that route via **ngrok** or **cloudflared** when testing webhooks locally. **Campaign funding is applied when the webhook succeeds or when the brand uses Apply credit** (`POST /brands/campaigns/:id/checkout/:externalId/sync`), which reads invoice status from Xendit’s API — the browser redirect alone does not credit the campaign.
+- **Webhook product (important):** VidU checkout uses **Payment Links** (`POST /v2/invoices`), not **Payment Requests v2**. In the Xendit dashboard, configure the **Invoices** (invoice paid) callback URL to `POST {API}/webhooks/xendit` — **not** only “Payment Requests v2 → Payment Succeeded”. The handler expects invoice payloads with `external_id` prefixed `fund_` and `status: PAID`. **Payout** callbacks (creator releases and brand refunds) must also hit the same URL so disbursement success/failure can settle the ledger.
+- **Pending / failed invoice webhooks:** Optional for crediting. Only **PAID** is required to auto-deposit; expired/failed checkouts are reconciled when the brand opens the Budget tab (transaction list polls Xendit) or uses **Apply credit** on “Payment received” rows. Adding pending/failed invoice webhooks would only speed up UI status — not required if you rely on sync + refresh.
+- **Xendit Dashboard → Webhook logs** record **HTTP delivery** to your URL (2xx = completed for that attempt). **Apply credit does not update those logs** — it never triggers a webhook. After Apply credit, a **manual resend** or automatic retry should return **2xx** (payment already in ledger; idempotent) and show completed for that delivery without double-crediting. Earlier failed attempts stay failed in history; that is expected.
+- **Invoice redirects:** checkout uses `success_redirect_url` / `failure_redirect_url` on the first `FRONTEND_URL` origin (`/brand/campaigns/:id?tab=budget&funding=success|failed`). Add those URLs in the Xendit dashboard if required for your account.
 
 ## OAuth (TikTok / Meta)
 
-- **TikTok:** `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, and `TIKTOK_REDIRECT_URI` (must match the Login Kit redirect you register; production TikTok requires **https** callbacks). Creators hit `GET /oauth/tiktok/start` (Bearer) → TikTok → `GET /oauth/tiktok/callback` → redirect to `FRONTEND_URL` with `oauth=success|error`.
+- **TikTok:** `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, and `TIKTOK_REDIRECT_URI` (must match Login Kit redirect URI in the developer portal). TikTok does **not** allow `http://localhost` callbacks — use an **HTTPS tunnel** (e.g. `ngrok http 3001`) and set `TIKTOK_REDIRECT_URI` to `https://<tunnel>/oauth/tiktok/callback`. PKCE `code_verifier` is embedded in the signed `state` JWT (cookie is a fallback). Flow: `GET /oauth/tiktok/start` (Bearer) → TikTok → `GET /oauth/tiktok/callback` on the **tunnel host** → redirect to `FRONTEND_URL` (`http://localhost:5173` is fine for the SPA). Keep `VITE_API_URL` on `http://localhost:3001` if the tunnel forwards to the same API process.
 - **Meta (Facebook Login + Instagram):** `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI` (must be `.../oauth/facebook/callback`). Scopes include Instagram insights; the creator needs a **professional Instagram** linked to a **Facebook Page** they manage for best results.
 - **`OAUTH_STATE_SECRET`:** at least 32 characters used to sign short-lived `state` JWTs (CSRF). If omitted in development, the API falls back to `TOKEN_ENCRYPTION_KEY` hex; set explicitly in production.
 
@@ -55,7 +65,8 @@ Example production:
 
 - **`POST /uploads/presign`** (brand JWT): body `purpose` (`brand_logo` | `campaign_cover`), `contentType` (`image/jpeg` | `image/png` | `image/webp`), and **`campaignId`** when `purpose` is `campaign_cover` (must be a campaign owned by the caller). Returns `uploadUrl`, `objectKey`, optional `publicUrl` (when `PUBLIC_OBJECT_BASE_URL` is set), `method`, `expiresIn`, `maxBytes`, and `headers` the browser must send on `PUT` (at least **`Content-Type`**).
 - **R2 (all required for presign to work):** `R2_S3_ENDPOINT` (e.g. `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`), `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` from an R2 **S3 API** token in the Cloudflare dashboard. If any are missing, presign returns **503**.
-- **`PUBLIC_OBJECT_BASE_URL`:** public origin (no trailing slash) used to build **`publicUrl`** and campaign card URLs; configure your R2 bucket or CDN so objects at `objectKey` are readable at that origin.
+- **`PUBLIC_OBJECT_BASE_URL`:** public origin (no trailing slash) used to build **`publicUrl`** and campaign card URLs; configure your R2 bucket or CDN so objects at `objectKey` are readable at that origin. When unset, the API returns **short-lived signed GET URLs** for brand campaign covers (list/detail) so local dev still shows images.
+- **R2 bucket CORS (required for browser cover upload):** In Cloudflare R2 → your bucket → **Settings → CORS**, allow `PUT` from your SPA origins (e.g. `http://localhost:5173`, `https://www.app.vid-u.com`). Example rule: methods `PUT`, `GET`, `HEAD`; allowed origins your `FRONTEND_URL` entries; allowed headers `Content-Type`. Without this, `POST /uploads/presign` succeeds but the browser **`PUT` to `uploadUrl` fails** (Network tab shows the storage request in red).
 - **Tuning (optional env, defaults in `src/config/uploads-r2.ts`):** `UPLOAD_PRESIGN_EXPIRES_SEC`, `UPLOAD_MAX_BYTES` (client-side expectation; enforce size in bucket policy / WAF as well).
 
 ## Webapp
@@ -70,8 +81,8 @@ Example production:
 
 ## Brand campaign limits (optional)
 
-- Defaults are in **`src/config/campaign-limits.ts`** (via `src/config/read-env.ts`). Override with **`MIN_BRAND_RATE_PER_1K`** and **`MIN_GROSS_PUBLISH_PHP`** only when you need non-default thresholds.
+- Defaults are in **`src/config/campaign-limits.ts`** (via `src/config/read-env.ts`). Override with **`MIN_BRAND_RATE_PER_1K`** and **`MIN_PUBLISH_PHP`** (minimum brand payment to fund / publish) when needed.
 
-## Fees / publish floor (optional)
+## Fees / auto-pause pool floor (optional)
 
-- Defaults in **`src/config/fees.ts`**. Override with **`PLATFORM_DEPOSIT_FEE_PERCENT`**, **`CREATOR_PAYOUT_FEE_PERCENT`**, **`MIN_PUBLISH_FLOOR_PHP`** when needed.
+- Defaults in **`src/config/fees.ts`**. Override **`PLATFORM_DEPOSIT_FEE_PERCENT`** and **`CREATOR_PAYOUT_FEE_PERCENT`** when needed. The net spendable floor for auto-pause / resume is derived from **`MIN_PUBLISH_PHP`** and the deposit fee (not a separate env var).

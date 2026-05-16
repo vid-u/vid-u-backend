@@ -2,7 +2,7 @@
 services:
   backend:
     image: node:22
-    container_name: vidu-landing-backend
+    container_name: vidu-backend
     restart: unless-stopped
     working_dir: /app
     depends_on:
@@ -13,7 +13,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3001
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/vidu_waitlist?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/vidu_backend?schema=public
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3001:3001"
@@ -24,21 +24,21 @@ services:
 
   postgres:
     image: postgres:16
-    container_name: vidu-landing-postgres
+    container_name: vidu-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: vidu_waitlist
+      POSTGRES_DB: vidu_backend
     ports:
-      - "5434:5432"
+      - "5432:5432"
     volumes:
-      - vidu_landing_pgdata:/var/lib/postgresql/data
+      - vidu_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d vidu_waitlist"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vidu_backend"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  vidu_landing_pgdata:
+  vidu_pgdata:

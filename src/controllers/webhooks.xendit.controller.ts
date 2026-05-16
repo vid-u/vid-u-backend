@@ -18,16 +18,22 @@ function verifyXenditWebhook(req: Request): void {
 }
 
 function isUuid(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    s,
+  );
 }
 
 /**
  * Xendit invoice + payout callbacks (single route; branch on payload `status` / type).
  */
-export async function postXenditWebhook(req: Request, res: Response): Promise<void> {
+export async function postXenditWebhook(
+  req: Request,
+  res: Response,
+): Promise<void> {
   verifyXenditWebhook(req);
   const body = req.body as Record<string, unknown>;
-  const externalId = typeof body.external_id === "string" ? body.external_id : undefined;
+  const externalId =
+    typeof body.external_id === "string" ? body.external_id : undefined;
   const status = typeof body.status === "string" ? body.status : undefined;
   const entityId = typeof body.id === "string" ? body.id : undefined;
   const amount =
@@ -36,12 +42,23 @@ export async function postXenditWebhook(req: Request, res: Response): Promise<vo
       : typeof body.amount === "number"
         ? body.amount
         : undefined;
-  const referenceId = typeof body.reference_id === "string" ? body.reference_id : undefined;
+  const referenceId =
+    typeof body.reference_id === "string" ? body.reference_id : undefined;
 
   const isFundingInvoice = Boolean(externalId?.startsWith("fund_"));
 
-  if (isFundingInvoice && status === "PAID" && entityId && amount !== undefined && externalId) {
-    await xenditWebhook.applyFundingInvoicePaid({ externalId, invoiceId: entityId, amount });
+  if (
+    isFundingInvoice &&
+    status === "PAID" &&
+    entityId &&
+    amount !== undefined &&
+    externalId
+  ) {
+    await xenditWebhook.applyFundingInvoicePaid({
+      externalId,
+      invoiceId: entityId,
+      amount,
+    });
   } else if (
     !isFundingInvoice &&
     entityId &&
@@ -52,7 +69,7 @@ export async function postXenditWebhook(req: Request, res: Response): Promise<vo
     await xenditWebhook.dispatchPayoutWebhook({
       payoutId: entityId,
       status,
-      submissionId: referenceId,
+      referenceId,
       failureReason:
         typeof body.failure_code === "string"
           ? body.failure_code

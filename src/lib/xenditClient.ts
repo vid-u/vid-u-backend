@@ -50,7 +50,8 @@ export async function xenditCreatePayout(input: {
   referenceId: string;
   channelCode: string;
   channelProperties: Record<string, string>;
-  amount: string;
+  /** PHP amount — Xendit requires a JSON number, not a string. */
+  amount: number;
   currency: string;
 }): Promise<{ id: string }> {
   const res = await fetch("https://api.xendit.co/v2/payouts", {

@@ -9,10 +9,50 @@ export type BrandPeriodRow = {
   spend: string;
 };
 
+export type BrandAnalyticsPeriodRow = BrandPeriodRow & {
+  views: string;
+  payout: string;
+};
+
 function dec(v: unknown): string {
   if (v == null) return "0.00";
   if (v instanceof Prisma.Decimal) return v.toFixed(2);
   return new Prisma.Decimal(String(v)).toFixed(2);
+}
+
+function bigintStr(v: unknown): string {
+  if (v == null) return "0";
+  if (typeof v === "bigint") return v.toString();
+  return String(v);
+}
+
+type BrandPerformanceSlice = { period: string; views: string; payout: string };
+
+function mergeBrandAnalyticsPeriods(
+  ledger: BrandPeriodRow[],
+  performance: BrandPerformanceSlice[],
+): BrandAnalyticsPeriodRow[] {
+  const byPeriod = new Map<string, BrandAnalyticsPeriodRow>();
+  for (const row of ledger) {
+    byPeriod.set(row.period, {
+      period: row.period,
+      deposits: row.deposits,
+      spend: row.spend,
+      views: "0",
+      payout: "0.00",
+    });
+  }
+  for (const row of performance) {
+    const existing = byPeriod.get(row.period) ?? {
+      period: row.period,
+      deposits: "0.00",
+      spend: "0.00",
+      views: "0",
+      payout: "0.00",
+    };
+    byPeriod.set(row.period, { ...existing, views: row.views, payout: row.payout });
+  }
+  return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 
 /** Paid submissions: sum `creator_net` by calendar month (UTC), most recent first. */
@@ -91,4 +131,85 @@ export async function getBrandLedgerByYear(userId: string): Promise<BrandPeriodR
     deposits: dec(r.deposits),
     spend: dec(r.spend),
   }));
+}
+
+/** Funded views and brand gross (`gross_amount`) by submission month (UTC). */
+async function getBrandPerformanceByMonth(userId: string): Promise<BrandPerformanceSlice[]> {
+  const rows = await prisma.$queryRaw<
+    Array<{ period: string; views: unknown; payout: unknown }>
+  >`
+    SELECT to_char(date_trunc('month', s.submitted_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS period,
+      COALESCE(SUM(s.funded_views), 0) AS views,
+      COALESCE(SUM(s.gross_amount), 0) AS payout
+    FROM submission s
+    INNER JOIN campaign c ON c.id = s.campaign_id
+    WHERE c.brand_user_id = ${userId}::uuid
+      AND s.status::text <> 'rejected'
+    GROUP BY 1
+    ORDER BY 1 ASC
+    LIMIT 24
+  `;
+  return rows.map((r) => ({
+    period: r.period,
+    views: bigintStr(r.views),
+    payout: dec(r.payout),
+  }));
+}
+
+async function getBrandPerformanceByYear(userId: string): Promise<BrandPerformanceSlice[]> {
+  const rows = await prisma.$queryRaw<
+    Array<{ period: string; views: unknown; payout: unknown }>
+  >`
+    SELECT to_char(date_trunc('year', s.submitted_at AT TIME ZONE 'UTC'), 'YYYY') AS period,
+      COALESCE(SUM(s.funded_views), 0) AS views,
+      COALESCE(SUM(s.gross_amount), 0) AS payout
+    FROM submission s
+    INNER JOIN campaign c ON c.id = s.campaign_id
+    WHERE c.brand_user_id = ${userId}::uuid
+      AND s.status::text <> 'rejected'
+    GROUP BY 1
+    ORDER BY 1 ASC
+    LIMIT 10
+  `;
+  return rows.map((r) => ({
+    period: r.period,
+    views: bigintStr(r.views),
+    payout: dec(r.payout),
+  }));
+}
+
+export async function getBrandAnalyticsByMonth(userId: string): Promise<BrandAnalyticsPeriodRow[]> {
+  const [ledger, performance] = await Promise.all([
+    getBrandLedgerByMonth(userId),
+    getBrandPerformanceByMonth(userId),
+  ]);
+  return mergeBrandAnalyticsPeriods(ledger, performance);
+}
+
+export async function getBrandAnalyticsByYear(userId: string): Promise<BrandAnalyticsPeriodRow[]> {
+  const [ledger, performance] = await Promise.all([
+    getBrandLedgerByYear(userId),
+    getBrandPerformanceByYear(userId),
+  ]);
+  return mergeBrandAnalyticsPeriods(ledger, performance);
+}
+
+export type AnalyticsGranularity = "monthly" | "yearly";
+
+export async function getBrandAnalyticsForGranularity(
+  userId: string,
+  granularity: AnalyticsGranularity,
+): Promise<BrandAnalyticsPeriodRow[]> {
+  return granularity === "monthly"
+    ? getBrandAnalyticsByMonth(userId)
+    : getBrandAnalyticsByYear(userId);
+}
+
+export async function getCreatorEarningsForGranularity(
+  userId: string,
+  granularity: AnalyticsGranularity,
+): Promise<CreatorPeriodRow[]> {
+  return granularity === "monthly"
+    ? getCreatorEarningsByMonth(userId)
+    : getCreatorEarningsByYear(userId);
 }

@@ -7,7 +7,8 @@ import {
 } from "../generated/prisma/enums.js";
 import { prisma } from "../lib/prisma.js";
 import { netBudgetFromGross, toDecimal } from "../utils/money.js";
-import { MIN_PUBLISH_FLOOR_PHP } from "../config/fees.js";
+import { MIN_PUBLISH_SPENDABLE_FLOOR_PHP, PLATFORM_DEPOSIT_FEE_PERCENT } from "../config/fees.js";
+import { getPendingBrandRefundNet } from "./brand-refund.service.js";
 import { computeCampaignBalances } from "./budget.service.js";
 
 export async function findLedgerByIdempotencyKey(idempotencyKey: string) {
@@ -53,9 +54,10 @@ export async function maybeAutoPauseCampaignTx(
     where: { campaignId },
     select: { status: true, grossAmount: true },
   });
-  const { availableBudget } = computeCampaignBalances(campaign, subs);
+  const pendingRefundNet = await getPendingBrandRefundNet(campaignId);
+  const { availableBudget } = computeCampaignBalances(campaign, subs, pendingRefundNet);
   const avail = toDecimal(availableBudget);
-  if (avail.lt(toDecimal(MIN_PUBLISH_FLOOR_PHP))) {
+  if (avail.lt(toDecimal(MIN_PUBLISH_SPENDABLE_FLOOR_PHP))) {
     await tx.campaign.update({
       where: { id: campaignId },
       data: { status: CampaignStatus.paused },
@@ -65,7 +67,7 @@ export async function maybeAutoPauseCampaignTx(
         campaignId,
         ledgerType: LedgerType.adjustment,
         amountGross: toDecimal(0),
-        note: `auto_pause:available_below_floor:${MIN_PUBLISH_FLOOR_PHP}`,
+        note: `auto_pause:available_below_floor:${MIN_PUBLISH_SPENDABLE_FLOOR_PHP}`,
       },
     });
   }
@@ -81,9 +83,10 @@ export async function maybeResumeAfterDepositTx(
     where: { campaignId },
     select: { status: true, grossAmount: true },
   });
-  const { availableBudget } = computeCampaignBalances(campaign, subs);
+  const pendingRefundNet = await getPendingBrandRefundNet(campaignId);
+  const { availableBudget } = computeCampaignBalances(campaign, subs, pendingRefundNet);
   const avail = toDecimal(availableBudget);
-  if (avail.gte(toDecimal(MIN_PUBLISH_FLOOR_PHP))) {
+  if (avail.gte(toDecimal(MIN_PUBLISH_SPENDABLE_FLOOR_PHP))) {
     await tx.campaign.update({
       where: { id: campaignId },
       data: { status: CampaignStatus.active },
@@ -116,11 +119,17 @@ export async function applyInvoicePaid(input: {
   externalId: string;
   grossAmount: Prisma.Decimal;
   sessionId: string;
-}): Promise<void> {
+}): Promise<{ created: boolean }> {
   const idempotencyKey = `invoice:${input.invoiceId}`;
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const existing = await tx.ledgerEntry.findFirst({ where: { idempotencyKey } });
-    if (existing) return;
+    if (existing) {
+      await tx.fundingCheckoutSession.updateMany({
+        where: { id: input.sessionId, status: { not: SessionStatus.paid } },
+        data: { status: SessionStatus.paid },
+      });
+      return { created: false };
+    }
 
     const campaign = await tx.campaign.findUniqueOrThrow({
       where: { id: input.campaignId },
@@ -138,13 +147,19 @@ export async function applyInvoicePaid(input: {
         ? CampaignStatus.active
         : campaign.status;
 
+    const platformFee = input.grossAmount.mul(toDecimal(PLATFORM_DEPOSIT_FEE_PERCENT));
+    const amountNet = input.grossAmount.sub(platformFee);
+
     await tx.ledgerEntry.create({
       data: {
         campaignId: input.campaignId,
         ledgerType: LedgerType.deposit,
         amountGross: input.grossAmount,
+        amountNet,
+        platformFeeAmount: platformFee,
         xenditInvoiceId: input.invoiceId,
         idempotencyKey,
+        note: firstDeposit ? "initial_fund" : "top_up",
       },
     });
 
@@ -164,9 +179,12 @@ export async function applyInvoicePaid(input: {
 
     await maybeAutoPauseCampaignTx(tx, input.campaignId);
     await maybeResumeAfterDepositTx(tx, input.campaignId);
+
+    return { created: true };
   });
 }
 
+/** @deprecated Prefer `brand-refund.service` (Xendit payout + webhook). Kept for admin/reconcile paths. */
 export async function applyRefund(input: {
   campaignId: string;
   amountGross: Prisma.Decimal;
@@ -205,6 +223,82 @@ export async function applyRefund(input: {
     });
 
     await maybeAutoPauseCampaignTx(tx, input.campaignId);
+  });
+}
+
+export async function applyBrandRefundSuccess(input: {
+  attemptId: string;
+  campaignId: string;
+  payoutId: string;
+  amountGross: Prisma.Decimal;
+  amountNet: Prisma.Decimal;
+  xenditFee: Prisma.Decimal;
+}): Promise<void> {
+  const idempotencyKey = `refund:complete:${input.payoutId}`;
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.ledgerEntry.findFirst({ where: { idempotencyKey } });
+    if (existing) return;
+
+    const campaign = await tx.campaign.findUniqueOrThrow({ where: { id: input.campaignId } });
+    const subs = await tx.submission.findMany({
+      where: { campaignId: input.campaignId, status: { not: SubmissionStatus.rejected } },
+      select: { fundedViews: true },
+    });
+    const pinnedViews = subs.reduce((a, s) => a + s.fundedViews, 0n);
+    /** Deposit fee not returned to brand (gross pool debit minus net sent). */
+    const platformFee = input.amountGross.sub(input.amountNet);
+    const platformFeeClamped = platformFee.lt(0) ? toDecimal(0) : platformFee;
+
+    await tx.ledgerEntry.create({
+      data: {
+        campaignId: input.campaignId,
+        ledgerType: LedgerType.refund_available,
+        amountGross: input.amountGross,
+        amountNet: input.amountNet,
+        xenditPayoutId: input.payoutId,
+        xenditFeeAmount: input.xenditFee,
+        platformFeeAmount: platformFeeClamped,
+        idempotencyKey,
+        note: "brand_refund_available",
+      },
+    });
+
+    const newGross = toDecimal(campaign.grossBudget).sub(input.amountGross);
+    const clamped = newGross.lt(0) ? toDecimal(0) : newGross;
+    await tx.campaign.update({
+      where: { id: input.campaignId },
+      data: {
+        grossBudget: clamped,
+        goalViews: pinnedViews,
+      },
+    });
+
+    await maybeAutoPauseCampaignTx(tx, input.campaignId);
+  });
+}
+
+export async function applyBrandRefundFailed(input: {
+  attemptId: string;
+  campaignId: string;
+  payoutId: string;
+  failureReason: string;
+}): Promise<void> {
+  const idempotencyKey = `refund:failed:${input.payoutId}`;
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.ledgerEntry.findFirst({ where: { idempotencyKey } });
+    if (existing) return;
+
+    await tx.ledgerEntry.create({
+      data: {
+        campaignId: input.campaignId,
+        ledgerType: LedgerType.release_failed,
+        amountGross: toDecimal(0),
+        xenditPayoutId: input.payoutId,
+        failureReason: input.failureReason,
+        idempotencyKey,
+        note: "brand_refund_failed",
+      },
+    });
   });
 }
 

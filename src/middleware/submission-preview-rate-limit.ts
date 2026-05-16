@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 /** Per-user cap on `POST /campaigns/:id/submissions/preview` (rolling window). */
 export const submissionPreviewRateLimiter = rateLimit({
@@ -8,6 +8,7 @@ export const submissionPreviewRateLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const id = req.dbUser?.id;
-    return id ? `preview:${id}` : `preview:${req.ip ?? "unknown"}`;
+    if (id) return `preview:${id}`;
+    return `preview:${ipKeyGenerator(req.ip ?? "unknown")}`;
   },
 });

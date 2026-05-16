@@ -3,6 +3,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { validateBody, validateParams } from "../../middleware/validate.js";
 import {
   brandCheckoutSessionBodySchema,
+  brandCheckoutSyncParamsSchema,
   campaignIdParamsSchema,
   createBrandCampaignBodySchema,
   patchBrandCampaignBodySchema,
@@ -32,6 +33,16 @@ brandCampaignRouter.post(
   validateParams(campaignIdParamsSchema),
   validateBody(brandCheckoutSessionBodySchema),
   asyncHandler(brands.postCheckoutSession),
+);
+brandCampaignRouter.get(
+  "/campaigns/:id/transactions",
+  validateParams(campaignIdParamsSchema),
+  asyncHandler(brands.getBrandCampaignTransactions),
+);
+brandCampaignRouter.post(
+  "/campaigns/:id/checkout/:externalId/sync",
+  validateParams(brandCheckoutSyncParamsSchema),
+  asyncHandler(brands.postSyncFundingCheckout),
 );
 brandCampaignRouter.post(
   "/campaigns/:id/release-payout",

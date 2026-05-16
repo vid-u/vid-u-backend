@@ -1,4 +1,6 @@
-import { readEnvMoney, readEnvPercent } from "./read-env.js";
+import { readEnvPercent } from "./read-env.js";
+
+import { MIN_PUBLISH_PHP } from "./campaign-limits.js";
 
 /** VidU's cut of every brand deposit (gross). */
 export const PLATFORM_DEPOSIT_FEE_PERCENT = readEnvPercent(
@@ -14,5 +16,9 @@ export const CREATOR_PAYOUT_FEE_PERCENT = readEnvPercent(
 
 export const CREATOR_PAYOUT_SHARE = 1 - CREATOR_PAYOUT_FEE_PERCENT;
 
-/** Remaining pool (gross, post-fee view) below this auto-pauses the campaign. */
-export const MIN_PUBLISH_FLOOR_PHP = readEnvMoney("MIN_PUBLISH_FLOOR_PHP", 10_000);
+/**
+ * Net spendable pool floor: same minimum publish deposit (`MIN_PUBLISH_PHP`) after deposit fee.
+ * Compared against API `availableBudget` (net).
+ */
+export const MIN_PUBLISH_SPENDABLE_FLOOR_PHP =
+  MIN_PUBLISH_PHP * (1 - PLATFORM_DEPOSIT_FEE_PERCENT);

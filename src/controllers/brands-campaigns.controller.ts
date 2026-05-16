@@ -9,6 +9,8 @@ import type {
   PatchBrandCampaignBodyDto,
 } from "../validation/brands-campaigns.schema.js";
 import * as brandCampaigns from "../services/brands-campaigns.service.js";
+import * as campaignTransactions from "../services/campaign-transactions.service.js";
+import type { BrandCheckoutSyncParamsDto } from "../validation/brands-campaigns.schema.js";
 
 export async function listBrandCampaigns(req: Request, res: Response): Promise<void> {
   const items = await brandCampaigns.listBrandCampaignCardsForUser(req.dbUser!.id);
@@ -74,4 +76,22 @@ export async function patchBrandCampaign(req: Request, res: Response): Promise<v
     req.body as PatchBrandCampaignBodyDto,
   );
   sendSuccess(res, { campaign: dto });
+}
+
+export async function getBrandCampaignTransactions(req: Request, res: Response): Promise<void> {
+  const data = await campaignTransactions.listBrandCampaignTransactions(
+    req.dbUser!.id,
+    paramString(req.params.id),
+  );
+  sendSuccess(res, data);
+}
+
+export async function postSyncFundingCheckout(req: Request, res: Response): Promise<void> {
+  const params = req.params as BrandCheckoutSyncParamsDto;
+  const data = await campaignTransactions.syncBrandFundingCheckout(
+    req.dbUser!.id,
+    params.id,
+    params.externalId,
+  );
+  sendSuccess(res, data);
 }

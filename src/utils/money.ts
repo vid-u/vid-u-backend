@@ -12,6 +12,15 @@ export function netBudgetFromGross(grossBudget: Prisma.Decimal): Prisma.Decimal 
   return grossBudget.mul(toDecimal(1 - PLATFORM_DEPOSIT_FEE_PERCENT));
 }
 
+/** Inverse of `netBudgetFromGross` — gross ledger movement for a net (spendable) amount. */
+export function grossFromNetBudget(netBudget: Prisma.Decimal): Prisma.Decimal {
+  const factor = toDecimal(1 - PLATFORM_DEPOSIT_FEE_PERCENT);
+  if (factor.lte(0)) {
+    throw new Error("PLATFORM_DEPOSIT_FEE_PERCENT must be less than 1");
+  }
+  return netBudget.div(factor);
+}
+
 /** creator_net = gross_amount * CREATOR_PAYOUT_SHARE */
 export function creatorNetFromGross(gross: Prisma.Decimal): Prisma.Decimal {
   return gross.mul(toDecimal(CREATOR_PAYOUT_SHARE));

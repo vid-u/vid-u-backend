@@ -10,11 +10,11 @@ import {
   primaryRoleFromProfiles,
   putMeBrandProfile,
 } from "../services/session-profile.service.js";
+import { getBrandDashboardStats } from "../services/user-brand-dashboard.service.js";
+import type { GetMeAnalyticsQueryDto } from "../validation/me.schema.js";
 import {
-  getBrandLedgerByMonth,
-  getBrandLedgerByYear,
-  getCreatorEarningsByMonth,
-  getCreatorEarningsByYear,
+  getBrandAnalyticsForGranularity,
+  getCreatorEarningsForGranularity,
 } from "../services/user-analytics.service.js";
 
 export async function getMeProfile(req: Request, res: Response): Promise<void> {
@@ -46,16 +46,19 @@ export async function putMeProfile(req: Request, res: Response): Promise<void> {
 export async function getMeAnalytics(req: Request, res: Response): Promise<void> {
   const userId = req.dbUser!.id;
   const role = primaryRoleFromProfiles(req.dbUser?.roleProfiles);
+  const { granularity } = req.query as GetMeAnalyticsQueryDto;
 
   if (role === "creator") {
-    const [monthly, yearly] = await Promise.all([
-      getCreatorEarningsByMonth(userId),
-      getCreatorEarningsByYear(userId),
-    ]);
-    sendSuccess(res, { monthly, yearly });
+    const periods = await getCreatorEarningsForGranularity(userId, granularity);
+    sendSuccess(res, { granularity, periods });
     return;
   }
 
-  const [monthly, yearly] = await Promise.all([getBrandLedgerByMonth(userId), getBrandLedgerByYear(userId)]);
-  sendSuccess(res, { monthly, yearly });
+  const periods = await getBrandAnalyticsForGranularity(userId, granularity);
+  sendSuccess(res, { granularity, periods });
+}
+
+export async function getMeDashboard(req: Request, res: Response): Promise<void> {
+  const stats = await getBrandDashboardStats(req.dbUser!.id);
+  sendSuccess(res, stats);
 }

@@ -201,6 +201,8 @@ model Campaign {
   ratePer1k          Decimal         @map("rate_per_1k") @db.Decimal(14, 2)
   grossBudget        Decimal         @default(0) @map("gross_budget") @db.Decimal(14, 2)
   spentBudget        Decimal         @default(0) @map("spent_budget") @db.Decimal(14, 2)
+  /** Intended gross funding from create/edit before first deposit; pre-fills checkout. */
+  plannedGrossBudget Decimal         @default(0) @map("planned_gross_budget") @db.Decimal(14, 2)
   goalViews          BigInt          @map("goal_views")
   platforms          Json
   rules              Json
@@ -278,15 +280,17 @@ model LedgerEntry {
 }
 
 model FundingCheckoutSession {
-  id          String        @id @default(uuid()) @db.Uuid
-  campaignId  String        @map("campaign_id") @db.Uuid
-  provider    String        @default("xendit")
-  externalId  String        @unique @map("external_id")
-  checkoutUrl String        @map("checkout_url")
-  status      SessionStatus @default(pending)
-  grossAmount Decimal       @map("gross_amount") @db.Decimal(14, 2)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  id              String        @id @default(uuid()) @db.Uuid
+  campaignId      String        @map("campaign_id") @db.Uuid
+  provider        String        @default("xendit")
+  externalId      String        @unique @map("external_id")
+  xenditInvoiceId String?       @map("xendit_invoice_id")
+  intent          String?
+  checkoutUrl     String        @map("checkout_url")
+  status          SessionStatus @default(pending)
+  grossAmount     Decimal       @map("gross_amount") @db.Decimal(14, 2)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 

@@ -31,6 +31,17 @@ export const listBrandCampaignSubmissionsQuerySchema = z
 
 export type ListBrandCampaignSubmissionsQueryDto = z.infer<typeof listBrandCampaignSubmissionsQuerySchema>;
 
+/** Brand dashboard inbox — submissions across all campaigns owned by the brand. */
+export const listBrandRecentSubmissionsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(50).default(10),
+    status: z.enum(["pending", "paying", "paid", "payout_failed", "rejected"]).optional(),
+  })
+  .strict();
+
+export type ListBrandRecentSubmissionsQueryDto = z.infer<typeof listBrandRecentSubmissionsQuerySchema>;
+
 export const listMeSubmissionsQuerySchema = z
   .object({
     page: z.coerce.number().int().positive().default(1),

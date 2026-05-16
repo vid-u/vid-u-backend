@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import type { UserRole } from "../generated/prisma/enums.js";
-import { extractBearer, verifySupabaseJwt } from "../lib/supabase-auth.js";
+import { extractSessionToken } from "../lib/auth-cookie.js";
+import { verifySupabaseJwt } from "../lib/supabase-auth.js";
 import { ForbiddenError, UnauthorizedError } from "../utils/errors.js";
 import { ensureUserFromJwt, readViduRoleFromJwt } from "../services/user.service.js";
 
@@ -13,8 +14,8 @@ export async function requireAuth(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const token = extractBearer(req.headers.authorization);
-    if (!token) throw new UnauthorizedError("Missing bearer token");
+    const token = extractSessionToken(req);
+    if (!token) throw new UnauthorizedError("Missing session");
     const payload = await verifySupabaseJwt(token);
     const dbUser = await ensureUserFromJwt(payload);
     const roleFromDb = dbUser.roleProfiles[0]?.role;
