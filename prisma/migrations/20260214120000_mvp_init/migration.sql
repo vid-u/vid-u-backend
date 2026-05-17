@@ -1,7 +1,9 @@
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
--- WaitlistRole enum and waitlist table: created by migration 20260211100000_vid_u_waitlist_only
+-- IMPORTANT (production / merge): Do NOT add WaitlistRole or waitlist DDL here.
+-- Deployed marketing DBs already have them from 20260211100000_vid_u_waitlist_only.
+-- Duplicating causes: ERROR: type "WaitlistRole" already exists
 
 -- CreateEnum
 CREATE TYPE "user_role_enum" AS ENUM ('creator', 'brand');
