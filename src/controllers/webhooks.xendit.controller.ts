@@ -2,7 +2,12 @@ import type { Request, Response } from "express";
 import { env } from "../lib/env.js";
 import { sendSuccess } from "../utils/api-response.js";
 import { ForbiddenError } from "../utils/errors.js";
+import {
+  parseXenditInvoiceWebhook,
+  parseXenditPayoutWebhook,
+} from "../services/xendit-webhook-payload.js";
 import * as xenditWebhook from "../services/xendit-webhook.service.js";
+import { logger } from "../utils/logger.js";
 
 function verifyXenditWebhook(req: Request): void {
   if (!env.XENDIT_WEBHOOK_TOKEN) {
@@ -24,7 +29,7 @@ function isUuid(s: string): boolean {
 }
 
 /**
- * Xendit invoice + payout callbacks (single route; branch on payload `status` / type).
+ * Xendit invoice + payout callbacks (single route; supports flat v2 and `event` + `data` v3).
  */
 export async function postXenditWebhook(
   req: Request,
@@ -32,51 +37,32 @@ export async function postXenditWebhook(
 ): Promise<void> {
   verifyXenditWebhook(req);
   const body = req.body as Record<string, unknown>;
-  const externalId =
-    typeof body.external_id === "string" ? body.external_id : undefined;
-  const status = typeof body.status === "string" ? body.status : undefined;
-  const entityId = typeof body.id === "string" ? body.id : undefined;
-  const amount =
-    typeof body.paid_amount === "number"
-      ? body.paid_amount
-      : typeof body.amount === "number"
-        ? body.amount
-        : undefined;
-  const referenceId =
-    typeof body.reference_id === "string" ? body.reference_id : undefined;
+  const event = typeof body.event === "string" ? body.event : undefined;
 
-  const isFundingInvoice = Boolean(externalId?.startsWith("fund_"));
+  const invoice = parseXenditInvoiceWebhook(body);
+  if (invoice) {
+    await xenditWebhook.handleFundingInvoiceWebhook(invoice);
+    sendSuccess(res, { received: true });
+    return;
+  }
 
-  if (
-    isFundingInvoice &&
-    status === "PAID" &&
-    entityId &&
-    amount !== undefined &&
-    externalId
-  ) {
-    await xenditWebhook.applyFundingInvoicePaid({
-      externalId,
-      invoiceId: entityId,
-      amount,
-    });
-  } else if (
-    !isFundingInvoice &&
-    entityId &&
-    status &&
-    referenceId &&
-    isUuid(referenceId)
-  ) {
-    await xenditWebhook.dispatchPayoutWebhook({
-      payoutId: entityId,
-      status,
-      referenceId,
-      failureReason:
-        typeof body.failure_code === "string"
-          ? body.failure_code
-          : typeof body.reason === "string"
-            ? body.reason
-            : "payout_failed",
-      feeAmount: typeof body.fee_amount === "number" ? body.fee_amount : 0,
+  const payout = parseXenditPayoutWebhook(body);
+  if (payout && isUuid(payout.referenceId)) {
+    await xenditWebhook.handlePayoutWebhook(payout);
+    sendSuccess(res, { received: true });
+    return;
+  }
+
+  if (event?.toLowerCase().startsWith("payout.")) {
+    logger.warn("Xendit payout webhook ignored — could not parse payload", {
+      event,
+      referenceId:
+        typeof body.reference_id === "string"
+          ? body.reference_id
+          : typeof (body.data as Record<string, unknown> | undefined)?.reference_id ===
+              "string"
+            ? (body.data as Record<string, unknown>).reference_id
+            : undefined,
     });
   }
 

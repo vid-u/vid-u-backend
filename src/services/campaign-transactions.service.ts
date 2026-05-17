@@ -29,6 +29,10 @@ export const FUNDING_CHECKOUT_EXPIRED_REASON =
 export const FUNDING_CHECKOUT_FAILED_REASON =
   "This checkout could not be completed. Start a new checkout to try again.";
 
+/** Brand-facing transaction copy (status lives on the badge, not in the label). */
+export const TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE = "Refund available balance";
+export const TX_DESCRIPTION_RELEASE_CREATOR_PAYOUT = "Release creator payout";
+
 /** Signed amount for brand UI — matches Xendit / bank movement when net is known. */
 function signedDisplayAmount(input: {
   gross: Prisma.Decimal;
@@ -120,6 +124,9 @@ function ledgerToTransaction(row: {
   }
 
   if (row.ledgerType === LedgerType.refund_available) {
+    if (row.note === "brand_refund_available") {
+      return null;
+    }
     const display = signedDisplayAmount({
       gross: grossDec,
       net: row.amountNet,
@@ -132,7 +139,7 @@ function ledgerToTransaction(row: {
       amountGross: `-${gross}`,
       amountDisplay: display,
       createdAt,
-      description: "Refund to brand account",
+      description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
       canSync: false,
     };
   }
@@ -150,13 +157,15 @@ function ledgerToTransaction(row: {
       amountGross: `-${gross}`,
       amountDisplay: display,
       createdAt,
-      description: "Creator payout",
+      description: TX_DESCRIPTION_RELEASE_CREATOR_PAYOUT,
       canSync: false,
     };
   }
 
   if (row.ledgerType === LedgerType.release_failed) {
-    const isBrandRefund = row.note === "brand_refund_failed";
+    if (row.note === "brand_refund_failed") {
+      return null;
+    }
     const display = signedDisplayAmount({
       gross: grossDec,
       net: row.amountNet,
@@ -164,12 +173,12 @@ function ledgerToTransaction(row: {
     });
     return {
       id: row.id,
-      kind: isBrandRefund ? "refund" : "payout_failed",
+      kind: "payout_failed",
       status: "failed",
       amountGross: `-${gross}`,
       amountDisplay: display,
       createdAt,
-      description: isBrandRefund ? "Refund failed" : "Creator payout failed",
+      description: TX_DESCRIPTION_RELEASE_CREATOR_PAYOUT,
       canSync: false,
       failureReason: row.failureReason ?? undefined,
     };
@@ -179,24 +188,110 @@ function ledgerToTransaction(row: {
     row.ledgerType === LedgerType.release_attempt &&
     row.note === `${BRAND_REFUND_LEDGER_NOTE}_pending`
   ) {
-    const display = signedDisplayAmount({
-      gross: grossDec,
-      net: row.amountNet,
-      negative: true,
-    });
-    return {
-      id: row.id,
-      kind: "refund_processing",
-      status: "pending",
-      amountGross: `-${gross}`,
-      amountDisplay: display,
-      createdAt,
-      description: "Refund processing",
-      canSync: false,
-    };
+    return null;
   }
 
   return null;
+}
+
+type LedgerRowForTransactions = {
+  id: string;
+  ledgerType: LedgerType;
+  amountGross: Prisma.Decimal;
+  amountNet: Prisma.Decimal | null;
+  note: string | null;
+  failureReason: string | null;
+  xenditPayoutId: string | null;
+  createdAt: Date;
+};
+
+function isBrandRefundPendingRow(row: LedgerRowForTransactions): boolean {
+  return (
+    row.ledgerType === LedgerType.release_attempt &&
+    row.note === `${BRAND_REFUND_LEDGER_NOTE}_pending`
+  );
+}
+
+/** One brand refund line per payout attempt; status reflects settlement, not a second row. */
+function brandRefundTransactionsFromLedger(
+  ledgerRows: LedgerRowForTransactions[],
+): { items: BrandCampaignTransactionDto[]; skipLedgerIds: Set<string> } {
+  const skipLedgerIds = new Set<string>();
+  const items: BrandCampaignTransactionDto[] = [];
+
+  const successByPayoutId = new Map<string, LedgerRowForTransactions>();
+  const failedByPayoutId = new Map<string, LedgerRowForTransactions>();
+
+  for (const row of ledgerRows) {
+    if (!row.xenditPayoutId) continue;
+    if (row.ledgerType === LedgerType.refund_available && row.note === "brand_refund_available") {
+      successByPayoutId.set(row.xenditPayoutId, row);
+    }
+    if (row.ledgerType === LedgerType.release_failed && row.note === "brand_refund_failed") {
+      failedByPayoutId.set(row.xenditPayoutId, row);
+    }
+  }
+
+  for (const attempt of ledgerRows) {
+    if (!isBrandRefundPendingRow(attempt)) continue;
+
+    const payoutId = attempt.xenditPayoutId;
+    const success = payoutId ? successByPayoutId.get(payoutId) : undefined;
+    const failed = payoutId ? failedByPayoutId.get(payoutId) : undefined;
+
+    const grossDec = attempt.amountGross;
+    const display = signedDisplayAmount({
+      gross: grossDec,
+      net: attempt.amountNet,
+      negative: true,
+    });
+    const amountGross = `-${decimalString(grossDec)}`;
+    const createdAt = attempt.createdAt.toISOString();
+
+    if (success) {
+      skipLedgerIds.add(success.id);
+      items.push({
+        id: attempt.id,
+        kind: "refund",
+        status: "completed",
+        amountGross,
+        amountDisplay: display,
+        createdAt,
+        description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
+        canSync: false,
+      });
+      continue;
+    }
+
+    if (failed) {
+      skipLedgerIds.add(failed.id);
+      items.push({
+        id: attempt.id,
+        kind: "refund",
+        status: "failed",
+        amountGross,
+        amountDisplay: display,
+        createdAt,
+        description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
+        canSync: false,
+        failureReason: failed.failureReason ?? undefined,
+      });
+      continue;
+    }
+
+    items.push({
+      id: attempt.id,
+      kind: "refund",
+      status: "pending",
+      amountGross,
+      amountDisplay: display,
+      createdAt,
+      description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
+      canSync: false,
+    });
+  }
+
+  return { items, skipLedgerIds };
 }
 
 type XenditFundingInvoiceState =
@@ -435,9 +530,50 @@ export async function listBrandCampaignTransactions(
       .filter((id): id is string => Boolean(id)),
   );
 
-  const items: BrandCampaignTransactionDto[] = [];
+  const { items, skipLedgerIds } = brandRefundTransactionsFromLedger(ledgerRows);
 
   for (const row of ledgerRows) {
+    if (skipLedgerIds.has(row.id) || isBrandRefundPendingRow(row)) continue;
+    if (
+      row.ledgerType === LedgerType.refund_available &&
+      row.note === "brand_refund_available"
+    ) {
+      const grossDec = row.amountGross;
+      items.push({
+        id: row.id,
+        kind: "refund",
+        status: "completed",
+        amountGross: `-${decimalString(grossDec)}`,
+        amountDisplay: signedDisplayAmount({
+          gross: grossDec,
+          net: row.amountNet,
+          negative: true,
+        }),
+        createdAt: row.createdAt.toISOString(),
+        description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
+        canSync: false,
+      });
+      continue;
+    }
+    if (row.ledgerType === LedgerType.release_failed && row.note === "brand_refund_failed") {
+      const grossDec = row.amountGross;
+      items.push({
+        id: row.id,
+        kind: "refund",
+        status: "failed",
+        amountGross: `-${decimalString(grossDec)}`,
+        amountDisplay: signedDisplayAmount({
+          gross: grossDec,
+          net: row.amountNet,
+          negative: true,
+        }),
+        createdAt: row.createdAt.toISOString(),
+        description: TX_DESCRIPTION_REFUND_AVAILABLE_BALANCE,
+        canSync: false,
+        failureReason: row.failureReason ?? undefined,
+      });
+      continue;
+    }
     const tx = ledgerToTransaction(row);
     if (tx) items.push(tx);
   }

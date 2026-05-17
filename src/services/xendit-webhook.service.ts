@@ -6,7 +6,21 @@ import {
   applyReleaseSuccess,
 } from "./ledger.service.js";
 import { dispatchBrandRefundPayoutWebhook } from "./brand-refund.service.js";
-import { BRAND_REFUND_LEDGER_NOTE } from "./xendit-payout.service.js";
+import {
+  BRAND_REFUND_LEDGER_NOTE,
+  isXenditPayoutFailed,
+  isXenditPayoutSuccess,
+} from "./xendit-payout.service.js";
+import type {
+  NormalizedXenditInvoiceWebhook,
+  NormalizedXenditPayoutWebhook,
+} from "./xendit-webhook-payload.js";
+import {
+  fundingPaidAmountMatchesSession,
+  verifyFundingInvoiceWebhook,
+  verifyPayoutWebhook,
+} from "./xendit-webhook-verify.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Credits campaign funding from a paid Xendit invoice (webhook or sync).
@@ -31,6 +45,55 @@ export async function applyFundingInvoicePaid(args: {
     sessionId: session.id,
   });
   return { applied: created };
+}
+
+/** Invoice webhook: verify with Xendit API, then session amount + invoice id, then credit. */
+export async function handleFundingInvoiceWebhook(
+  webhook: NormalizedXenditInvoiceWebhook,
+): Promise<void> {
+  const verified = await verifyFundingInvoiceWebhook(webhook);
+  if (!verified) return;
+
+  const session = await prisma.fundingCheckoutSession.findUnique({
+    where: { externalId: webhook.externalId },
+  });
+  if (!session) {
+    logger.warn("Funding webhook ignored: checkout session not found", {
+      externalId: webhook.externalId,
+    });
+    return;
+  }
+
+  if (session.xenditInvoiceId && session.xenditInvoiceId !== verified.invoiceId) {
+    logger.warn("Funding webhook ignored: invoice id does not match checkout session", {
+      externalId: webhook.externalId,
+      sessionInvoiceId: session.xenditInvoiceId,
+      xenditInvoiceId: verified.invoiceId,
+    });
+    return;
+  }
+
+  if (!fundingPaidAmountMatchesSession(verified.amount, session.grossAmount)) {
+    logger.warn("Funding webhook ignored: paid amount does not match session gross", {
+      externalId: webhook.externalId,
+      paidAmount: verified.amount,
+      sessionGross: session.grossAmount.toString(),
+    });
+    return;
+  }
+
+  if (!session.xenditInvoiceId) {
+    await prisma.fundingCheckoutSession.update({
+      where: { id: session.id },
+      data: { xenditInvoiceId: verified.invoiceId },
+    });
+  }
+
+  await applyFundingInvoicePaid({
+    externalId: webhook.externalId,
+    invoiceId: verified.invoiceId,
+    amount: verified.amount,
+  });
 }
 
 export async function dispatchPayoutWebhook(input: {
@@ -58,7 +121,7 @@ export async function dispatchPayoutWebhook(input: {
   }
 
   const submissionId = input.referenceId;
-  if (input.status === "SUCCEEDED" || input.status === "COMPLETED") {
+  if (isXenditPayoutSuccess(input.status)) {
     await applyReleaseSuccess({
       submissionId,
       payoutId: input.payoutId,
@@ -66,11 +129,27 @@ export async function dispatchPayoutWebhook(input: {
     });
     return;
   }
-  if (input.status === "FAILED") {
+  if (isXenditPayoutFailed(input.status)) {
     await applyReleaseFailed({
       submissionId,
       payoutId: input.payoutId,
       failureReason: input.failureReason,
     });
   }
+}
+
+/** Payout webhook: verify with Xendit API, then dispatch using provider-confirmed fields. */
+export async function handlePayoutWebhook(
+  webhook: NormalizedXenditPayoutWebhook,
+): Promise<void> {
+  const verified = await verifyPayoutWebhook(webhook);
+  if (!verified) return;
+
+  await dispatchPayoutWebhook({
+    payoutId: verified.id,
+    status: verified.status,
+    referenceId: verified.referenceId,
+    failureReason: verified.failureReason,
+    feeAmount: verified.feeAmount,
+  });
 }

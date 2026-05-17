@@ -4294,7 +4294,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"po_example\",\n  \"status\": \"SUCCEEDED\",\n  \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n  \"fee_amount\": 10\n}",
+              "raw": "{\n  \"event\": \"payout.succeeded\",\n  \"business_id\": \"example\",\n  \"created\": \"2026-05-17T01:27:00.000Z\",\n  \"data\": {\n    \"id\": \"disb_example\",\n    \"status\": \"SUCCEEDED\",\n    \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n    \"amount\": 19550,\n    \"currency\": \"PHP\",\n    \"fee_amount\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4330,7 +4330,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"id\": \"po_example\",\n  \"status\": \"SUCCEEDED\",\n  \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n  \"fee_amount\": 10\n}",
+                  "raw": "{\n  \"event\": \"payout.succeeded\",\n  \"business_id\": \"example\",\n  \"created\": \"2026-05-17T01:27:00.000Z\",\n  \"data\": {\n    \"id\": \"disb_example\",\n    \"status\": \"SUCCEEDED\",\n    \"reference_id\": \"22222222-2222-4222-8222-222222222222\",\n    \"amount\": 19550,\n    \"currency\": \"PHP\",\n    \"fee_amount\": 10\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"

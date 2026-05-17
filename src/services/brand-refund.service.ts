@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "../generated/prisma/client.js";
-import { CampaignStatus, LedgerType } from "../generated/prisma/enums.js";
+import { CampaignStatus, LedgerType, SubmissionStatus } from "../generated/prisma/enums.js";
 import { maybeResumeAfterDeposit } from "./auto-pause.service.js";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../lib/env.js";
 import { ConflictError, NotFoundError } from "../utils/errors.js";
+import { logger } from "../utils/logger.js";
 import { grossFromNetBudget, toDecimal } from "../utils/money.js";
 import { computeCampaignBalances } from "./budget.service.js";
 import { getDefaultPaymentMethodForPayout } from "./payment-methods-payout.service.js";
@@ -81,15 +82,28 @@ async function createPendingRefundAttempt(input: {
         xenditPayoutId: input.payoutId,
       },
     });
+    const subs = await tx.submission.findMany({
+      where: {
+        campaignId: input.campaignId,
+        status: { not: SubmissionStatus.rejected },
+      },
+      select: { fundedViews: true },
+    });
+    const pinnedViews = subs.reduce((a, s) => a + s.fundedViews, 0n);
+
     const campaign = await tx.campaign.findUniqueOrThrow({
       where: { id: input.campaignId },
     });
+    const updates: { status?: CampaignStatus; goalViews: bigint } = {
+      goalViews: pinnedViews,
+    };
     if (campaign.status === CampaignStatus.active) {
-      await tx.campaign.update({
-        where: { id: input.campaignId },
-        data: { status: CampaignStatus.paused },
-      });
+      updates.status = CampaignStatus.paused;
     }
+    await tx.campaign.update({
+      where: { id: input.campaignId },
+      data: updates,
+    });
   });
 }
 
@@ -176,6 +190,15 @@ export async function dispatchBrandRefundPayoutWebhook(input: {
     where: { id: input.attemptId },
   });
   if (!attempt || attempt.note !== `${BRAND_REFUND_LEDGER_NOTE}_pending`) {
+    return;
+  }
+
+  if (!attempt.xenditPayoutId || attempt.xenditPayoutId !== input.payoutId) {
+    logger.warn("Brand refund webhook ignored: payout id does not match attempt", {
+      attemptId: input.attemptId,
+      webhookPayoutId: input.payoutId,
+      attemptPayoutId: attempt.xenditPayoutId,
+    });
     return;
   }
 
