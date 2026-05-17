@@ -42,11 +42,14 @@ export const listBrandRecentSubmissionsQuerySchema = z
 
 export type ListBrandRecentSubmissionsQueryDto = z.infer<typeof listBrandRecentSubmissionsQuerySchema>;
 
+/** UI tabs: `pending` includes in-flight `paying`; `rejected` includes `payout_failed`. */
 export const listMeSubmissionsQuerySchema = z
   .object({
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(20),
-    status: z.enum(["pending", "paying", "paid", "payout_failed", "rejected"]).optional(),
+    status: z.enum(["pending", "paid", "rejected"]).optional(),
+    /** Dashboard inbox: pending, paying, rejected, payout_failed (excludes paid). */
+    scope: z.enum(["recent"]).optional(),
   })
   .strict();
 

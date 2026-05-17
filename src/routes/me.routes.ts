@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { requireAuth, requireAnyRole } from "../middleware/auth.js";
-import { requireViduBrand, requireViduCreator } from "../middleware/role-access.js";
+import { requireViduCreator } from "../middleware/role-access.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validate.js";
 import {
   listMeSubmissionsQuerySchema,
@@ -44,7 +44,7 @@ meRouter.get(
   validateQuery(getMeAnalyticsQuerySchema),
   asyncHandler(meProfile.getMeAnalytics),
 );
-meRouter.get("/dashboard", requireAuth, requireViduBrand, asyncHandler(meProfile.getMeDashboard));
+meRouter.get("/dashboard", requireAuth, requireAnyRole(), asyncHandler(meProfile.getMeDashboard));
 meRouter.get(
   "/submissions",
   requireAuth,

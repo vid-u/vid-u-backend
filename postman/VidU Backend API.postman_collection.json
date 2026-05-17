@@ -2874,6 +2874,73 @@
           "name": "Dashboard",
           "item": [
             {
+              "name": "GET /me/dashboard (creator)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{creatorBearerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/me/dashboard",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "me",
+                    "dashboard"
+                  ]
+                },
+                "description": "Creator headline stats. **`lifetimeEarnings`** and **`totalVerifiedViews`** sum **paid** submissions only. **`allSubmissions`** counts every status. **`pendingSubmissions`** includes `pending` + `paying`. **`submissionCounts`** drives submissions page tabs."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{creatorBearerToken}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/me/dashboard",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "me",
+                        "dashboard"
+                      ]
+                    },
+                    "description": "Creator headline stats. **`lifetimeEarnings`** and **`totalVerifiedViews`** sum **paid** submissions only. **`allSubmissions`** counts every status. **`pendingSubmissions`** includes `pending` + `paying`. **`submissionCounts`** drives submissions page tabs."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"lifetimeEarnings\": \"422.00\",\n    \"totalVerifiedViews\": \"8500\",\n    \"allSubmissions\": 2,\n    \"pendingSubmissions\": 1,\n    \"submissionCounts\": {\n      \"all\": 2,\n      \"pending\": 1,\n      \"paid\": 1,\n      \"rejected\": 0\n    }\n  }\n}"
+                }
+              ]
+            },
+            {
               "name": "GET /me/analytics",
               "request": {
                 "method": "GET",

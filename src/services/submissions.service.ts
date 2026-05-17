@@ -302,9 +302,38 @@ export async function listBrandRecentSubmissionsForUser(
   };
 }
 
+function meSubmissionsStatusWhere(
+  status: ListMeSubmissionsQueryDto["status"],
+): Prisma.SubmissionWhereInput["status"] | undefined {
+  if (!status) return undefined;
+  if (status === "pending") return { in: ["pending", "paying"] };
+  if (status === "rejected") return { in: ["rejected", "payout_failed"] };
+  return status;
+}
+
+const meSubmissionListInclude = {
+  campaign: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      brand: {
+        select: {
+          brandProfile: { select: { brandName: true } },
+        },
+      },
+    },
+  },
+} as const;
+
 export async function listMeSubmissionsForUser(creatorUserId: string, q: ListMeSubmissionsQueryDto) {
   const where: Prisma.SubmissionWhereInput = { creatorUserId };
-  if (q.status) where.status = q.status;
+  if (q.scope === "recent") {
+    where.status = { in: ["pending", "paying", "rejected", "payout_failed"] };
+  } else {
+    const statusFilter = meSubmissionsStatusWhere(q.status);
+    if (statusFilter) where.status = statusFilter;
+  }
 
   const page = q.page;
   const limit = q.limit;
@@ -316,9 +345,7 @@ export async function listMeSubmissionsForUser(creatorUserId: string, q: ListMeS
       orderBy: { submittedAt: "desc" },
       skip,
       take: limit,
-      include: {
-        campaign: { select: { id: true, title: true, status: true } },
-      },
+      include: meSubmissionListInclude,
     }),
     prisma.submission.count({ where }),
   ]);
@@ -329,7 +356,9 @@ export async function listMeSubmissionsForUser(creatorUserId: string, q: ListMeS
       campaignId: s.campaignId,
       campaignTitle: s.campaign.title,
       campaignStatus: s.campaign.status,
+      brandName: s.campaign.brand.brandProfile?.brandName ?? "Brand",
       normalizedUrl: s.normalizedUrl,
+      postUrl: contentUrlFromNormalized(s.normalizedUrl, s.platform),
       platform: s.platform,
       viewsLocked: s.viewsLocked.toString(),
       fundedViews: s.fundedViews.toString(),

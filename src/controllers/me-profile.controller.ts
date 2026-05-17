@@ -11,6 +11,7 @@ import {
   putMeBrandProfile,
 } from "../services/session-profile.service.js";
 import { getBrandDashboardStats } from "../services/user-brand-dashboard.service.js";
+import { getCreatorDashboardStats } from "../services/user-creator-dashboard.service.js";
 import type { GetMeAnalyticsQueryDto } from "../validation/me.schema.js";
 import {
   getBrandAnalyticsForGranularity,
@@ -59,6 +60,13 @@ export async function getMeAnalytics(req: Request, res: Response): Promise<void>
 }
 
 export async function getMeDashboard(req: Request, res: Response): Promise<void> {
-  const stats = await getBrandDashboardStats(req.dbUser!.id);
-  sendSuccess(res, stats);
+  const userId = req.dbUser!.id;
+  const role = primaryRoleFromProfiles(req.dbUser?.roleProfiles);
+
+  if (role === "creator") {
+    sendSuccess(res, await getCreatorDashboardStats(userId));
+    return;
+  }
+
+  sendSuccess(res, await getBrandDashboardStats(userId));
 }
