@@ -59,6 +59,8 @@ enum PaymentMethodKind {
 
 enum CampaignStatus {
   draft
+  /** Paid at Xendit / credited in ledger; waiting for master→sub split settlement. */
+  funding_pending
   active
   paused
   ended
@@ -141,9 +143,19 @@ model BrandProfile {
   instagram       String?  @map("instagram")
   facebook        String?  @map("facebook")
   tiktok          String?  @map("tiktok")
-  logoObjectKey   String?  @map("logo_object_key")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  logoObjectKey        String?  @map("logo_object_key")
+  /** xenPlatform Owned sub-account id — use as `for-user-id` on invoices/payouts. */
+  xenditSubAccountId   String?  @unique @map("xendit_sub_account_id")
+  /** Xendit account status (e.g. REGISTERED, LIVE). `for-user-id` only when LIVE. */
+  xenditSubAccountStatus            String?   @map("xendit_sub_account_status")
+  /** Gross PHP to move master → sub-account after first fund (while sub-account not LIVE). */
+  xenditPendingInitialTransferAmount Decimal? @map("xendit_pending_initial_transfer_amount") @db.Decimal(14, 2)
+  xenditPendingInitialTransferRef    String?   @unique @map("xendit_pending_initial_transfer_ref")
+  xenditInitialTransferCompletedAt   DateTime? @map("xendit_initial_transfer_completed_at")
+  /** Split rule: master invoice → {brand pool %} to this brand's sub-account. */
+  xenditDepositSplitRuleId           String?   @map("xendit_deposit_split_rule_id")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -284,8 +296,13 @@ model FundingCheckoutSession {
   campaignId      String        @map("campaign_id") @db.Uuid
   provider        String        @default("xendit")
   externalId      String        @unique @map("external_id")
-  xenditInvoiceId String?       @map("xendit_invoice_id")
-  intent          String?
+  xenditInvoiceId      String?  @map("xendit_invoice_id")
+  /** Brand sub-account that receives the post-split pool (master-collect flow). */
+  xenditSubAccountId   String?  @map("xendit_sub_account_id")
+  /** Split rule attached at checkout (`with-split-rule`). */
+  xenditSplitRuleId    String?  @map("xendit_split_rule_id")
+  xenditSplitSettledAt DateTime? @map("xendit_split_settled_at")
+  intent               String?
   checkoutUrl     String        @map("checkout_url")
   status          SessionStatus @default(pending)
   grossAmount     Decimal       @map("gross_amount") @db.Decimal(14, 2)

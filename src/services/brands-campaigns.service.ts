@@ -15,6 +15,14 @@ import { maybeAutoPauseCampaign } from "./auto-pause.service.js";
 import { publicUrlFromObjectKey, resolveObjectDisplayUrl } from "../lib/publicObjectUrl.js";
 import { brandCampaignFundingRedirectUrl } from "../lib/frontendOrigin.js";
 import { createXenditInvoice } from "./xendit-invoice.service.js";
+import { reconcileMissedInitialXenditSetup } from "./xendit-platform.service.js";
+import {
+  assertCampaignXenditPoolSettled,
+  isCampaignXenditPoolSettled,
+  prepareBrandXenditForFunding,
+  reconcileLegacyFundingPendingCampaign,
+} from "./xendit-split.service.js";
+import { isXenPlatformEnabled, ensureBrandXenditSubAccount } from "./xendit-platform.service.js";
 import { processPayoutReleaseQueue } from "./payout-release.worker.js";
 import type {
   BrandCheckoutSessionBodyDto,
@@ -42,6 +50,8 @@ function decimalString(d: Prisma.Decimal): string {
 export type BrandCampaignDto = Awaited<ReturnType<typeof computeCampaignDto>>;
 
 async function computeCampaignDto(campaignId: string) {
+  await reconcileLegacyFundingPendingCampaign(campaignId);
+
   const c = await prisma.campaign.findUnique({
     where: { id: campaignId },
     include: {
@@ -60,6 +70,7 @@ async function computeCampaignDto(campaignId: string) {
   const balances = computeCampaignBalances(c, c.submissions, pendingRefundNet);
   const brandName = c.brand.brandProfile?.brandName ?? "";
   const refundInProgress = pendingRefundNet.gt(0) || (await hasInFlightBrandRefund(campaignId));
+  const xenditPoolSettled = await isCampaignXenditPoolSettled(campaignId);
   return {
     id: c.id,
     brandUserId: c.brandUserId,
@@ -84,6 +95,7 @@ async function computeCampaignDto(campaignId: string) {
     pendingRefundBudget: balances.pendingRefundBudget,
     availableBudget: balances.availableBudget,
     refundInProgress,
+    xenditPoolSettled,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -172,6 +184,10 @@ export async function createBrandCampaignForUser(
       coverImageObjectKey: b.coverImageObjectKey ?? undefined,
     },
   });
+  if (isXenPlatformEnabled()) {
+    await ensureBrandXenditSubAccount(brandUserId);
+  }
+
   const dto = await computeCampaignDto(campaign.id);
   if (!dto) throw new NotFoundError("Campaign not found");
   return dto;
@@ -203,14 +219,20 @@ export async function createBrandCheckoutSession(
   const hasInitialFund = toDecimal(c.grossBudget).gt(0);
   const intent = hasInitialFund ? "add_funds" : (parsed.intent ?? "add_funds");
 
+  await reconcileMissedInitialXenditSetup(brandUserId);
+
   const externalId = `fund_${randomUUID()}`;
+  const xenditSetup = await prepareBrandXenditForFunding(brandUserId);
+
   const { invoiceId, invoiceUrl } = await createXenditInvoice({
     externalId,
     amount: gross,
     description: `Campaign ${c.title}`,
-    metadata: { campaignId, intent },
+    metadata: { campaignId, intent, brandUserId },
     successRedirectUrl: brandCampaignFundingRedirectUrl(campaignId, "success"),
     failureRedirectUrl: brandCampaignFundingRedirectUrl(campaignId, "failed"),
+    forUserId: null,
+    splitRuleId: xenditSetup?.splitRuleId ?? null,
   });
 
   await prisma.fundingCheckoutSession.create({
@@ -218,6 +240,8 @@ export async function createBrandCheckoutSession(
       campaignId,
       externalId,
       xenditInvoiceId: invoiceId,
+      xenditSubAccountId: xenditSetup?.subAccountId ?? null,
+      xenditSplitRuleId: xenditSetup?.splitRuleId ?? null,
       intent,
       checkoutUrl: invoiceUrl,
       status: "pending",
@@ -241,6 +265,8 @@ export async function releasePayoutsForCampaign(
   if (c.status === "draft") {
     throw new ForbiddenError("Campaign not fundable for payout from draft");
   }
+
+  await assertCampaignXenditPoolSettled(campaignId);
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`

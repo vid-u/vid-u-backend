@@ -37,6 +37,7 @@ function paidAmountFromInvoice(invoice: {
  */
 export async function verifyFundingInvoiceWebhook(
   webhook: NormalizedXenditInvoiceWebhook,
+  forUserId?: string | null,
 ): Promise<{ invoiceId: string; amount: number } | null> {
   if (!env.XENDIT_SECRET_KEY?.trim()) {
     logger.warn("Funding webhook ignored: XENDIT_SECRET_KEY not set", {
@@ -47,14 +48,24 @@ export async function verifyFundingInvoiceWebhook(
 
   let invoice;
   try {
-    invoice = await getXenditInvoice(webhook.invoiceId);
+    invoice = await getXenditInvoice(webhook.invoiceId, forUserId);
   } catch (err) {
-    logger.warn("Funding webhook ignored: could not verify invoice with Xendit", {
-      externalId: webhook.externalId,
-      invoiceId: webhook.invoiceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
+    if (forUserId) {
+      try {
+        invoice = await getXenditInvoice(webhook.invoiceId, null);
+      } catch {
+        /* fall through */
+      }
+    }
+    if (!invoice) {
+      logger.warn("Funding webhook ignored: could not verify invoice with Xendit", {
+        externalId: webhook.externalId,
+        invoiceId: webhook.invoiceId,
+        forUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   if (invoice.externalId !== webhook.externalId) {
@@ -83,6 +94,7 @@ export async function verifyFundingInvoiceWebhook(
  */
 export async function verifyPayoutWebhook(
   webhook: NormalizedXenditPayoutWebhook,
+  forUserId?: string | null,
 ): Promise<XenditPayoutSnapshot | null> {
   if (isDevXenditPayoutId(webhook.payoutId)) {
     return {
@@ -104,14 +116,24 @@ export async function verifyPayoutWebhook(
 
   let payout;
   try {
-    payout = await getXenditPayout(webhook.payoutId);
+    payout = await getXenditPayout(webhook.payoutId, forUserId);
   } catch (err) {
-    logger.warn("Payout webhook ignored: could not verify payout with Xendit", {
-      payoutId: webhook.payoutId,
-      referenceId: webhook.referenceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
+    if (forUserId) {
+      try {
+        payout = await getXenditPayout(webhook.payoutId, null);
+      } catch {
+        /* fall through */
+      }
+    }
+    if (!payout) {
+      logger.warn("Payout webhook ignored: could not verify payout with Xendit", {
+        payoutId: webhook.payoutId,
+        referenceId: webhook.referenceId,
+        forUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   if (payout.id !== webhook.payoutId) {

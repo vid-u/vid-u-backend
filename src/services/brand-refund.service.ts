@@ -17,6 +17,8 @@ import {
   BRAND_REFUND_LEDGER_NOTE,
   createXenditDisbursement,
 } from "./xendit-payout.service.js";
+import { assertCampaignXenditPoolSettled } from "./xendit-split.service.js";
+import { getBrandXenditForUserId } from "./xendit-platform.service.js";
 
 function decimalString(d: Prisma.Decimal): string {
   return d.toFixed(2);
@@ -118,6 +120,8 @@ export async function refundAvailableCampaignBalance(
   const c = await prisma.campaign.findFirst({ where: { id: campaignId, brandUserId } });
   if (!c) throw new NotFoundError("Campaign not found");
 
+  await assertCampaignXenditPoolSettled(campaignId);
+
   const inFlight = await findInFlightBrandRefund(campaignId);
   if (inFlight) {
     throw new ConflictError("refund_in_progress");
@@ -160,12 +164,14 @@ export async function refundAvailableCampaignBalance(
     return { refunded: decimalString(availableNet), payoutId: devPayoutId };
   }
 
+  const forUserId = await getBrandXenditForUserId(brandUserId);
   const { payoutId } = await createXenditDisbursement({
     idempotencyKey,
     referenceId: attemptId,
     paymentMethod,
     amountNetPhp,
     description: `Campaign refund ${c.title}`.slice(0, 100),
+    forUserId,
   });
 
   await createPendingRefundAttempt({

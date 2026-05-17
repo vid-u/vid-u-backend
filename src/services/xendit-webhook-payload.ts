@@ -16,6 +16,13 @@ export type NormalizedXenditPayoutWebhook = {
   feeAmount: number;
 };
 
+export type NormalizedXenditAccountWebhook = {
+  accountId: string;
+  status: string;
+  event: string;
+  email?: string;
+};
+
 function payloadRecord(body: Record<string, unknown>): Record<string, unknown> {
   const data = body.data;
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -123,4 +130,32 @@ export function parseXenditPayoutWebhook(
         : 0;
 
   return { payoutId, referenceId, status, failureReason, feeAmount };
+}
+
+/** xenPlatform `account.created` (and similar) — sub-account ready / status changes. */
+export function parseXenditAccountWebhook(
+  body: Record<string, unknown>,
+): NormalizedXenditAccountWebhook | null {
+  const event = typeof body.event === "string" ? body.event : undefined;
+  if (!event?.toLowerCase().startsWith("account.")) {
+    return null;
+  }
+
+  const payload = payloadRecord(body);
+  const accountId =
+    typeof payload.id === "string"
+      ? payload.id
+      : typeof body.business_id === "string"
+        ? body.business_id
+        : undefined;
+  if (!accountId) {
+    return null;
+  }
+
+  const status =
+    typeof payload.status === "string" ? payload.status : "UNKNOWN";
+
+  const email = typeof payload.email === "string" ? payload.email.trim() : undefined;
+
+  return { accountId, status, event, email: email || undefined };
 }

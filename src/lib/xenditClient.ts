@@ -53,14 +53,20 @@ export async function xenditCreatePayout(input: {
   /** PHP amount — Xendit requires a JSON number, not a string. */
   amount: number;
   currency: string;
+  /** xenPlatform sub-account id (`for-user-id`). */
+  forUserId?: string | null;
 }): Promise<{ id: string }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: authHeader(),
+    "Idempotency-Key": input.idempotencyKey,
+  };
+  if (input.forUserId) {
+    headers["for-user-id"] = input.forUserId;
+  }
   const res = await fetch("https://api.xendit.co/v2/payouts", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader(),
-      "Idempotency-Key": input.idempotencyKey,
-    },
+    headers,
     body: JSON.stringify({
       reference_id: input.referenceId,
       channel_code: input.channelCode,

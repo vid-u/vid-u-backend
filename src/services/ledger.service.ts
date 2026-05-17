@@ -119,7 +119,7 @@ export async function applyInvoicePaid(input: {
   externalId: string;
   grossAmount: Prisma.Decimal;
   sessionId: string;
-}): Promise<{ created: boolean }> {
+}): Promise<{ created: boolean; firstDeposit: boolean }> {
   const idempotencyKey = `invoice:${input.invoiceId}`;
   return prisma.$transaction(async (tx) => {
     const existing = await tx.ledgerEntry.findFirst({ where: { idempotencyKey } });
@@ -128,7 +128,7 @@ export async function applyInvoicePaid(input: {
         where: { id: input.sessionId, status: { not: SessionStatus.paid } },
         data: { status: SessionStatus.paid },
       });
-      return { created: false };
+      return { created: false, firstDeposit: false };
     }
 
     const campaign = await tx.campaign.findUniqueOrThrow({
@@ -180,7 +180,7 @@ export async function applyInvoicePaid(input: {
     await maybeAutoPauseCampaignTx(tx, input.campaignId);
     await maybeResumeAfterDepositTx(tx, input.campaignId);
 
-    return { created: true };
+    return { created: true, firstDeposit };
   });
 }
 

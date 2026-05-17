@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { publicUrlFromObjectKey } from "../lib/publicObjectUrl.js";
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import type { PutMeBrandProfileBodyDto } from "../validation/me-profile.schema.js";
+import { syncBrandXenditSubAccountProfile } from "./xendit-platform.service.js";
 
 export function primaryRoleFromProfiles(
   roleProfiles: { role: UserRole }[] | undefined,
@@ -97,5 +98,9 @@ export async function putMeBrandProfile(userId: string, body: PutMeBrandProfileB
       where: { userId },
       data: patch,
     });
+  }
+
+  if (patch.brandName !== undefined) {
+    await syncBrandXenditSubAccountProfile(userId, patch.brandName);
   }
 }

@@ -11,6 +11,7 @@ import {
   isXenditPayoutFailed,
   isXenditPayoutSuccess,
 } from "./xendit-payout.service.js";
+import { getBrandXenditForUserId } from "./xendit-platform.service.js";
 import type {
   NormalizedXenditInvoiceWebhook,
   NormalizedXenditPayoutWebhook,
@@ -30,30 +31,29 @@ export async function applyFundingInvoicePaid(args: {
   externalId: string;
   invoiceId: string;
   amount: number;
-}): Promise<{ applied: boolean }> {
+}): Promise<{ applied: boolean; firstDeposit: boolean }> {
   const session = await prisma.fundingCheckoutSession.findUnique({
     where: { externalId: args.externalId },
+    include: { campaign: { select: { brandUserId: true } } },
   });
-  if (!session) return { applied: false };
+  if (!session) return { applied: false, firstDeposit: false };
 
   const gross = new Prisma.Decimal(args.amount);
-  const { created } = await applyInvoicePaid({
+  const { created, firstDeposit } = await applyInvoicePaid({
     campaignId: session.campaignId,
     invoiceId: args.invoiceId,
     externalId: args.externalId,
     grossAmount: gross,
     sessionId: session.id,
   });
-  return { applied: created };
+
+  return { applied: created, firstDeposit };
 }
 
 /** Invoice webhook: verify with Xendit API, then session amount + invoice id, then credit. */
 export async function handleFundingInvoiceWebhook(
   webhook: NormalizedXenditInvoiceWebhook,
 ): Promise<void> {
-  const verified = await verifyFundingInvoiceWebhook(webhook);
-  if (!verified) return;
-
   const session = await prisma.fundingCheckoutSession.findUnique({
     where: { externalId: webhook.externalId },
   });
@@ -63,6 +63,10 @@ export async function handleFundingInvoiceWebhook(
     });
     return;
   }
+
+  const invoiceForUserId = session.xenditSplitRuleId ? null : session.xenditSubAccountId;
+  const verified = await verifyFundingInvoiceWebhook(webhook, invoiceForUserId);
+  if (!verified) return;
 
   if (session.xenditInvoiceId && session.xenditInvoiceId !== verified.invoiceId) {
     logger.warn("Funding webhook ignored: invoice id does not match checkout session", {
@@ -142,7 +146,25 @@ export async function dispatchPayoutWebhook(input: {
 export async function handlePayoutWebhook(
   webhook: NormalizedXenditPayoutWebhook,
 ): Promise<void> {
-  const verified = await verifyPayoutWebhook(webhook);
+  let forUserId: string | null = null;
+  const brandRefundAttempt = await prisma.ledgerEntry.findFirst({
+    where: {
+      id: webhook.referenceId,
+      note: `${BRAND_REFUND_LEDGER_NOTE}_pending`,
+    },
+    select: { campaignId: true },
+  });
+  if (brandRefundAttempt) {
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: brandRefundAttempt.campaignId },
+      select: { brandUserId: true },
+    });
+    if (campaign) {
+      forUserId = await getBrandXenditForUserId(campaign.brandUserId);
+    }
+  }
+
+  const verified = await verifyPayoutWebhook(webhook, forUserId);
   if (!verified) return;
 
   await dispatchPayoutWebhook({

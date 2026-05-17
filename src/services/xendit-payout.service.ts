@@ -79,10 +79,16 @@ function parsePayoutRow(data: Record<string, unknown>): XenditPayoutSnapshot {
 }
 
 /** Fetches payout state from Xendit (webhook verification). */
-export async function getXenditPayout(payoutId: string): Promise<XenditPayoutSnapshot> {
-  const auth = xenditAuthHeader();
+export async function getXenditPayout(
+  payoutId: string,
+  forUserId?: string | null,
+): Promise<XenditPayoutSnapshot> {
+  const headers: Record<string, string> = { Authorization: xenditAuthHeader() };
+  if (forUserId) {
+    headers["for-user-id"] = forUserId;
+  }
   const res = await fetch(`https://api.xendit.co/v2/payouts/${encodeURIComponent(payoutId)}`, {
-    headers: { Authorization: auth },
+    headers,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -127,6 +133,8 @@ export async function createXenditDisbursement(input: {
   paymentMethod: PaymentMethod;
   amountNetPhp: number;
   description: string;
+  /** xenPlatform sub-account id — debits that brand's balance only. */
+  forUserId?: string | null;
 }): Promise<{ payoutId: string }> {
   const accountNumber = decryptSecret(input.paymentMethod.accountNumberEncrypted);
   validatePayoutAmount(input.paymentMethod.xenditChannelCode, input.amountNetPhp);
@@ -141,6 +149,7 @@ export async function createXenditDisbursement(input: {
     channelProperties,
     amount,
     currency: "PHP",
+    forUserId: input.forUserId,
   });
 
   return { payoutId: id };

@@ -3,9 +3,15 @@ import { env } from "../lib/env.js";
 import { sendSuccess } from "../utils/api-response.js";
 import { ForbiddenError } from "../utils/errors.js";
 import {
+  parseXenditAccountWebhook,
   parseXenditInvoiceWebhook,
   parseXenditPayoutWebhook,
 } from "../services/xendit-webhook-payload.js";
+import { handleXenditAccountWebhook } from "../services/xendit-platform.service.js";
+import {
+  handleXenditSplitPaymentWebhook,
+  parseXenditSplitWebhook,
+} from "../services/xendit-split.service.js";
 import * as xenditWebhook from "../services/xendit-webhook.service.js";
 import { logger } from "../utils/logger.js";
 
@@ -38,6 +44,20 @@ export async function postXenditWebhook(
   verifyXenditWebhook(req);
   const body = req.body as Record<string, unknown>;
   const event = typeof body.event === "string" ? body.event : undefined;
+
+  const account = parseXenditAccountWebhook(body);
+  if (account) {
+    await handleXenditAccountWebhook(account);
+    sendSuccess(res, { received: true });
+    return;
+  }
+
+  const split = parseXenditSplitWebhook(body);
+  if (split) {
+    await handleXenditSplitPaymentWebhook(split);
+    sendSuccess(res, { received: true });
+    return;
+  }
 
   const invoice = parseXenditInvoiceWebhook(body);
   if (invoice) {

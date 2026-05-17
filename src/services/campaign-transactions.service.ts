@@ -11,6 +11,7 @@ import {
 } from "./xendit-invoice.service.js";
 import { logger } from "../utils/logger.js";
 import { PLATFORM_DEPOSIT_FEE_PERCENT } from "../config/fees.js";
+import { reconcileMissedInitialXenditSetup } from "./xendit-platform.service.js";
 import { applyFundingInvoicePaid } from "./xendit-webhook.service.js";
 
 function decimalString(d: Prisma.Decimal): string {
@@ -305,6 +306,7 @@ type XenditFundingInvoiceState =
 async function resolveXenditFundingInvoiceState(session: {
   xenditInvoiceId: string | null;
   externalId: string;
+  xenditSubAccountId?: string | null;
 }): Promise<XenditFundingInvoiceState> {
   if (!env.XENDIT_SECRET_KEY?.trim()) {
     logger.warn("Xendit status skipped: XENDIT_SECRET_KEY not set", {
@@ -492,6 +494,7 @@ export async function listBrandCampaignTransactions(
   brandUserId: string,
   campaignId: string,
 ): Promise<{ items: BrandCampaignTransactionDto[] }> {
+  await reconcileMissedInitialXenditSetup(brandUserId);
   await assertBrandOwnsCampaign(brandUserId, campaignId);
 
   const [ledgerRows, sessions, depositInvoiceIds] = await Promise.all([
@@ -605,6 +608,8 @@ export async function syncBrandFundingCheckout(
   campaignId: string,
   externalId: string,
 ): Promise<{ items: BrandCampaignTransactionDto[]; applied: boolean }> {
+  await reconcileMissedInitialXenditSetup(brandUserId);
+
   await assertBrandOwnsCampaign(brandUserId, campaignId);
 
   if (!externalId.startsWith("fund_")) {
@@ -616,21 +621,33 @@ export async function syncBrandFundingCheckout(
   });
   if (!session) throw new NotFoundError("Checkout session not found");
 
+  const forUserId = session.xenditSplitRuleId ? null : session.xenditSubAccountId;
   let invoice;
   try {
     invoice = session.xenditInvoiceId
-      ? await getXenditInvoice(session.xenditInvoiceId)
-      : await getXenditInvoiceByExternalId(session.externalId);
-  } catch (err) {
-    if (err instanceof AppError) throw err;
-    logger.error("Apply credit: unexpected Xendit error", {
-      externalId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw new AppError(
-      "We could not reach the payment provider. Try again in a moment.",
-      503,
-    );
+      ? await getXenditInvoice(session.xenditInvoiceId, forUserId)
+      : await getXenditInvoiceByExternalId(session.externalId, forUserId);
+  } catch (firstErr) {
+    if (forUserId) {
+      try {
+        invoice = session.xenditInvoiceId
+          ? await getXenditInvoice(session.xenditInvoiceId, null)
+          : await getXenditInvoiceByExternalId(session.externalId, null);
+      } catch {
+        /* use firstErr below */
+      }
+    }
+    if (!invoice) {
+      if (firstErr instanceof AppError) throw firstErr;
+      logger.error("Apply credit: unexpected Xendit error", {
+        externalId,
+        error: firstErr instanceof Error ? firstErr.message : String(firstErr),
+      });
+      throw new AppError(
+        "We could not reach the payment provider. Try again in a moment.",
+        503,
+      );
+    }
   }
 
   if (!invoice) {

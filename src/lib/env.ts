@@ -19,6 +19,8 @@ const envSchema = z.object({
 
   XENDIT_SECRET_KEY: z.string().optional(),
   XENDIT_WEBHOOK_TOKEN: z.string().optional(),
+  /** xenPlatform master `user_id` — source for master → sub-account transfers. */
+  XENDIT_MASTER_USER_ID: z.string().optional(),
 
   TIKTOK_CLIENT_KEY: z.string().optional(),
   TIKTOK_CLIENT_SECRET: z.string().optional(),

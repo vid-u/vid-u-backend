@@ -10,6 +10,10 @@ type CreateInvoiceInput = {
   metadata: Record<string, string>;
   successRedirectUrl?: string;
   failureRedirectUrl?: string;
+  /** xenPlatform sub-account id (`for-user-id`). Omit for master-account checkouts. */
+  forUserId?: string | null;
+  /** Master-collect + split to sub (Option 2). */
+  splitRuleId?: string | null;
 };
 
 export type XenditInvoiceSnapshot = {
@@ -68,17 +72,35 @@ function xenditAuthHeader(): string {
   return `Basic ${Buffer.from(`${env.XENDIT_SECRET_KEY}:`).toString("base64")}`;
 }
 
+function xenditRequestHeaders(
+  forUserId?: string | null,
+  splitRuleId?: string | null,
+): Record<string, string> {
+  const headers: Record<string, string> = { Authorization: xenditAuthHeader() };
+  if (forUserId) {
+    headers["for-user-id"] = forUserId;
+  }
+  if (splitRuleId) {
+    headers["with-split-rule"] = splitRuleId;
+  }
+  return headers;
+}
+
 /**
  * Creates a Xendit v2 invoice (Payment Link). Requires `XENDIT_SECRET_KEY`.
  */
 export async function createXenditInvoice(
   input: CreateInvoiceInput,
-): Promise<{ invoiceId: string; invoiceUrl: string }> {
-  const auth = xenditAuthHeader();
+): Promise<{
+  invoiceId: string;
+  invoiceUrl: string;
+  forUserId: string | null;
+  splitRuleId: string | null;
+}> {
   const res = await fetch("https://api.xendit.co/v2/invoices", {
     method: "POST",
     headers: {
-      Authorization: auth,
+      ...xenditRequestHeaders(input.forUserId, input.splitRuleId),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -100,16 +122,23 @@ export async function createXenditInvoice(
     logger.error("Xendit create invoice: invalid response shape", { data });
     throw new AppError(PAYMENT_UNAVAILABLE, 503);
   }
-  return { invoiceId: data.id, invoiceUrl: data.invoice_url };
+  return {
+    invoiceId: data.id,
+    invoiceUrl: data.invoice_url,
+    forUserId: input.forUserId ?? null,
+    splitRuleId: input.splitRuleId ?? null,
+  };
 }
 
 /**
  * Fetches invoice state from Xendit (for funding sync when webhooks are delayed or failed).
  */
-export async function getXenditInvoice(invoiceId: string): Promise<XenditInvoiceSnapshot> {
-  const auth = xenditAuthHeader();
+export async function getXenditInvoice(
+  invoiceId: string,
+  forUserId?: string | null,
+): Promise<XenditInvoiceSnapshot> {
   const res = await fetch(`https://api.xendit.co/v2/invoices/${encodeURIComponent(invoiceId)}`, {
-    headers: { Authorization: auth },
+    headers: xenditRequestHeaders(forUserId, null),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -128,11 +157,11 @@ export async function getXenditInvoice(invoiceId: string): Promise<XenditInvoice
 /** Resolves an invoice when only `external_id` is stored (older checkout sessions). */
 export async function getXenditInvoiceByExternalId(
   externalId: string,
+  forUserId?: string | null,
 ): Promise<XenditInvoiceSnapshot | null> {
-  const auth = xenditAuthHeader();
   const res = await fetch(
     `https://api.xendit.co/v2/invoices?external_id=${encodeURIComponent(externalId)}`,
-    { headers: { Authorization: auth } },
+    { headers: xenditRequestHeaders(forUserId, null) },
   );
   if (!res.ok) {
     const text = await res.text();
@@ -165,17 +194,32 @@ export async function getXenditInvoiceByExternalId(
 export async function tryGetXenditInvoiceForSession(session: {
   xenditInvoiceId: string | null;
   externalId: string;
+  xenditSubAccountId?: string | null;
+  xenditSplitRuleId?: string | null;
 }): Promise<XenditInvoiceSnapshot | null> {
   if (!env.XENDIT_SECRET_KEY?.trim()) return null;
+  /** Master-collect + split: invoice on master (no for-user-id). Legacy: sub-scoped. */
+  const forUserId = session.xenditSplitRuleId ? null : (session.xenditSubAccountId ?? null);
   try {
     if (session.xenditInvoiceId) {
-      return await getXenditInvoice(session.xenditInvoiceId);
+      return await getXenditInvoice(session.xenditInvoiceId, forUserId);
     }
-    return await getXenditInvoiceByExternalId(session.externalId);
+    return await getXenditInvoiceByExternalId(session.externalId, forUserId);
   } catch (err) {
+    if (forUserId) {
+      try {
+        if (session.xenditInvoiceId) {
+          return await getXenditInvoice(session.xenditInvoiceId, null);
+        }
+        return await getXenditInvoiceByExternalId(session.externalId, null);
+      } catch {
+        /* fall through */
+      }
+    }
     logger.warn("Xendit invoice status lookup failed", {
       externalId: session.externalId,
       invoiceId: session.xenditInvoiceId,
+      forUserId,
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
