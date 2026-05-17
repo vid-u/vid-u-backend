@@ -103,7 +103,12 @@ export async function getTikTokOAuthCallback(req: Request, res: Response): Promi
 export async function getMetaOAuthStart(req: Request, res: Response): Promise<void> {
   assertMetaConfigured();
   const state = await signOAuthState(req.dbUser!.id, "facebook");
-  res.redirect(302, buildMetaAuthorizeUrl(state));
+  const authorizeUrl = buildMetaAuthorizeUrl(state);
+  if (req.headers.accept?.includes("application/json")) {
+    sendSuccess(res, { authorizeUrl });
+    return;
+  }
+  res.redirect(302, authorizeUrl);
 }
 
 export async function getMetaOAuthCallback(req: Request, res: Response): Promise<void> {

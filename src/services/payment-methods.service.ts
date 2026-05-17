@@ -1,7 +1,7 @@
 import type { PayoutPurpose, PaymentMethodKind } from "../generated/prisma/enums.js";
 import type { PaymentMethod, Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
-import { encryptSecret } from "../lib/crypto.js";
+import { decryptSecret, encryptSecret } from "../lib/crypto.js";
 import { channelLimits } from "../config/xendit_channel_limits.js";
 import { NotFoundError, ValidationError } from "../utils/errors.js";
 import type { PatchPaymentMethodBodyDto, PostPaymentMethodBodyDto } from "../validation/payment-methods.schema.js";
@@ -14,6 +14,25 @@ function kindFromChannelCode(code: string): PaymentMethodKind {
 
 function digitsOnly(accountNumber: string): string {
   return accountNumber.replace(/\D/g, "");
+}
+
+async function hasDuplicatePaymentMethodAccount(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  purpose: PayoutPurpose,
+  xenditChannelCode: string,
+  normalizedDigits: string,
+): Promise<boolean> {
+  const rows = await tx.paymentMethod.findMany({
+    where: { userId, purpose, xenditChannelCode },
+  });
+  for (const row of rows) {
+    const existingDigits = digitsOnly(decryptSecret(row.accountNumberEncrypted));
+    if (existingDigits === normalizedDigits) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function purposeFromUserRole(role: "brand" | "creator"): PayoutPurpose {
@@ -100,6 +119,17 @@ export async function createPaymentMethodForUser(
   const accountNumberEncrypted = encryptSecret(digits);
 
   return prisma.$transaction(async (tx) => {
+    const duplicate = await hasDuplicatePaymentMethodAccount(
+      tx,
+      userId,
+      purpose,
+      body.xenditChannelCode,
+      digits,
+    );
+    if (duplicate) {
+      throw new ValidationError("This payment method is already saved.");
+    }
+
     const existingCount = await tx.paymentMethod.count({ where: { userId, purpose } });
     const firstMethod = existingCount === 0;
     const userRequestedDefault = body.isDefault === true;
