@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { clearSessionCookie, setSessionCookie } from "../lib/auth-cookie.js";
 import { sendSuccess } from "../utils/api-response.js";
+import { verifyGoogleOAuthState } from "../lib/oauth-state.js";
+import { logger } from "../utils/logger.js";
 import {
   clearGooglePkceCookie,
   completeGoogleOAuth,
@@ -9,7 +11,22 @@ import {
   startGoogleOAuth,
   verifyEmailOtp,
 } from "../services/auth.service.js";
-import { env } from "../lib/env.js";
+import { env, getPublicApiUrl } from "../lib/env.js";
+
+function oauthFrontendBase(): string {
+  const raw = env.FRONTEND_URL ?? "http://localhost:5173";
+  return raw.split(",")[0]!.trim().replace(/\/$/, "");
+}
+
+/** Read-only: verify deployed OAuth URL alignment (no secrets). */
+export function getGoogleOAuthConfig(_req: Request, res: Response): void {
+  sendSuccess(res, {
+    publicApiUrl: getPublicApiUrl(),
+    googleCallbackUrl: `${getPublicApiUrl()}/auth/google/callback`,
+    frontendRedirectBase: oauthFrontendBase(),
+    nodeEnv: env.NODE_ENV,
+  });
+}
 
 export async function postEmailSendCode(req: Request, res: Response): Promise<void> {
   const { email } = req.body as { email: string };
@@ -27,24 +44,75 @@ export async function postEmailVerify(req: Request, res: Response): Promise<void
 }
 
 export async function getGoogleStart(_req: Request, res: Response): Promise<void> {
-  startGoogleOAuth(res);
+  await startGoogleOAuth(res);
 }
 
 export async function getGoogleCallback(req: Request, res: Response): Promise<void> {
-  const code = typeof req.query.code === "string" ? req.query.code : "";
-  const verifier =
+  const base = oauthFrontendBase();
+  const q = req.query as Record<string, string | undefined>;
+
+  logger.info("Google OAuth callback hit", {
+    hasCode: Boolean(q.code),
+    hasError: Boolean(q.error),
+    hasState: Boolean(q.state),
+  });
+
+  if (q.error) {
+    clearGooglePkceCookie(res);
+    logger.warn("Google OAuth provider error", {
+      error: q.error,
+      description: q.error_description,
+    });
+    res.redirect(
+      302,
+      `${base}/auth?oauth=error&reason=${encodeURIComponent(q.error_description ?? q.error)}`,
+    );
+    return;
+  }
+
+  const code = typeof q.code === "string" ? q.code : "";
+  const stateVerifier = await verifyGoogleOAuthState(typeof q.state === "string" ? q.state : undefined);
+  const cookieVerifier =
     typeof req.cookies?.[googlePkceCookieName] === "string"
       ? req.cookies[googlePkceCookieName]
       : undefined;
-  const session = await completeGoogleOAuth(code, verifier);
-  clearGooglePkceCookie(res);
-  setSessionCookie(res, session.accessToken);
-  const redirectBase = env.FRONTEND_URL?.split(",")[0]?.trim() ?? "http://localhost:5173";
-  const url = new URL("/", redirectBase);
-  if (session.requiresRoleSelection) {
-    url.searchParams.set("requires_role", "1");
+  const verifier = stateVerifier ?? cookieVerifier;
+
+  if (!code) {
+    clearGooglePkceCookie(res);
+    res.redirect(302, `${base}/auth?oauth=error&reason=missing_code`);
+    return;
   }
-  res.redirect(302, url.toString());
+
+  if (!verifier) {
+    clearGooglePkceCookie(res);
+    logger.warn("Google OAuth missing PKCE verifier", {
+      hasState: Boolean(q.state),
+      hasCookie: Boolean(cookieVerifier),
+    });
+    res.redirect(302, `${base}/auth?oauth=error&reason=missing_pkce_verifier`);
+    return;
+  }
+
+  try {
+    const session = await completeGoogleOAuth(code, verifier);
+    clearGooglePkceCookie(res);
+    setSessionCookie(res, session.accessToken);
+    const url = new URL("/", base);
+    if (session.requiresRoleSelection) {
+      url.searchParams.set("requires_role", "1");
+    }
+    logger.info("Google OAuth succeeded", {
+      requiresRoleSelection: session.requiresRoleSelection,
+      pkceFromState: Boolean(stateVerifier),
+    });
+    res.redirect(302, url.toString());
+  } catch (err) {
+    clearGooglePkceCookie(res);
+    const message = err instanceof Error ? err.message : "google_oauth_failed";
+    logger.error("Google OAuth callback failed", { error: message });
+    res.redirect(302, `${base}/auth?oauth=error&reason=${encodeURIComponent(message)}`);
+  }
 }
 
 export async function postSignOut(_req: Request, res: Response): Promise<void> {

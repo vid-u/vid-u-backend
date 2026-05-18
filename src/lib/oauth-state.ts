@@ -56,3 +56,25 @@ export async function verifyOAuthState(state: string | undefined): Promise<OAuth
     return null;
   }
 }
+
+/** Guest Google login — PKCE in state when start/callback hosts differ (tunnel vs localhost). */
+export async function signGoogleOAuthState(codeVerifier: string): Promise<string> {
+  const key = stateSigningKey();
+  return new SignJWT({ p: "google", cv: codeVerifier })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("10m")
+    .sign(key);
+}
+
+export async function verifyGoogleOAuthState(state: string | undefined): Promise<string | null> {
+  if (!state) return null;
+  try {
+    const key = stateSigningKey();
+    const { payload } = await jwtVerify(state, key, { algorithms: ["HS256"] });
+    if (payload.p !== "google") return null;
+    return typeof payload.cv === "string" ? payload.cv : null;
+  } catch {
+    return null;
+  }
+}

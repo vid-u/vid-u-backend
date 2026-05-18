@@ -16,6 +16,7 @@ authRouter.post(
   validateBody(emailVerifyBodySchema),
   asyncHandler(authController.postEmailVerify),
 );
+authRouter.get("/google/config", authController.getGoogleOAuthConfig);
 authRouter.get("/google/start", asyncHandler(authController.getGoogleStart));
 authRouter.get("/google/callback", asyncHandler(authController.getGoogleCallback));
 authRouter.post("/sign-out", asyncHandler(authController.postSignOut));
