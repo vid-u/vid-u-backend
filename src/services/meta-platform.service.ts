@@ -1,3 +1,4 @@
+import { Prisma } from "../generated/prisma/client.js";
 import { env, getPublicApiUrl } from "../lib/env.js";
 import { encryptSecret, decryptSecret } from "../lib/crypto.js";
 import { prisma } from "../lib/prisma.js";
@@ -18,6 +19,8 @@ const META_PAGE_SCOPES_DEFAULT = [
   "pages_show_list",
   "pages_read_engagement",
   "read_insights",
+  /** Required since Graph API v19+ for `/me/accounts` to return granted Pages. */
+  "business_management",
 ] as const;
 
 export function getMetaLoginAppId(): string {
@@ -389,20 +392,76 @@ type FbEngagement = {
 type FbReelMeta = { id?: string; from?: { id?: string } } & FbEngagement;
 
 type FbManagedPage = { id: string; name?: string; access_token: string };
+type FbAccountRow = { id?: string; name?: string; access_token?: string };
 
-async function listManagedFacebookPages(accessToken: string): Promise<FbManagedPage[]> {
-  const json = (await graphGet("/me/accounts", {
-    fields: "id,name,access_token",
-    access_token: accessToken,
-    limit: "50",
-  })) as { data?: Array<{ id?: string; name?: string; access_token?: string }> };
-  const rows: FbManagedPage[] = [];
-  for (const p of json.data ?? []) {
-    if (p.id && p.access_token) {
-      rows.push({ id: p.id, name: p.name, access_token: p.access_token });
-    }
+async function fetchPageAccessTokenForUser(
+  pageId: string,
+  userAccessToken: string,
+): Promise<string | null> {
+  try {
+    const json = (await graphGet(`/${pageId}`, {
+      fields: "access_token",
+      access_token: userAccessToken,
+    })) as { access_token?: string };
+    return json.access_token ?? null;
+  } catch {
+    return null;
   }
-  return rows;
+}
+
+async function fetchFacebookAccountRows(accessToken: string): Promise<FbAccountRow[]> {
+  const collected: FbAccountRow[] = [];
+  let url: string | null =
+    `${graphHost()}/me/accounts?fields=${encodeURIComponent("id,name,access_token,tasks")}&limit=100&access_token=${encodeURIComponent(accessToken)}`;
+
+  for (let page = 0; page < 15 && url; page += 1) {
+    const r = await fetch(url);
+    const json = (await r.json()) as GraphErr & {
+      data?: FbAccountRow[];
+      paging?: { next?: string };
+    };
+    if (!r.ok || json.error) {
+      const raw = json.error?.message ?? r.statusText;
+      throw new AppError(`Meta Graph error: ${raw}`, 502);
+    }
+    collected.push(...(json.data ?? []));
+    url = json.paging?.next ?? null;
+  }
+  return collected;
+}
+
+async function listManagedFacebookPages(
+  accessToken: string,
+  appKind: MetaAppKind,
+): Promise<FbManagedPage[]> {
+  const byId = new Map<string, FbManagedPage>();
+
+  const addPage = (p: FbManagedPage) => {
+    if (!byId.has(p.id)) byId.set(p.id, p);
+  };
+
+  try {
+    const accountRows = await fetchFacebookAccountRows(accessToken);
+    for (const p of accountRows) {
+      if (!p.id) continue;
+      let pageAccessToken = p.access_token;
+      if (!pageAccessToken) {
+        pageAccessToken = (await fetchPageAccessTokenForUser(p.id, accessToken)) ?? undefined;
+      }
+      if (pageAccessToken) {
+        addPage({ id: p.id, name: p.name, access_token: pageAccessToken });
+      }
+    }
+  } catch {
+    /* fall through to granular page ids */
+  }
+
+  const granularIds = await fetchGranularPageIdsFromToken(accessToken, appKind);
+  for (const p of await resolveManagedPagesFromIds(granularIds, accessToken)) {
+    addPage(p);
+  }
+
+  return [...byId.values()];
 }
 
 async function listAllManagedFacebookPages(
@@ -410,14 +469,21 @@ async function listAllManagedFacebookPages(
   loginUserToken: string,
 ): Promise<FbManagedPage[]> {
   const byId = new Map<string, FbManagedPage>();
-  for (const token of [pageAppUserToken, loginUserToken].filter((t): t is string => Boolean(t))) {
+  if (pageAppUserToken) {
     try {
-      for (const p of await listManagedFacebookPages(token)) {
-        if (!byId.has(p.id)) byId.set(p.id, p);
+      for (const p of await listManagedFacebookPages(pageAppUserToken, "page")) {
+        byId.set(p.id, p);
       }
     } catch {
-      /* try next token */
+      /* try login token */
     }
+  }
+  try {
+    for (const p of await listManagedFacebookPages(loginUserToken, "login")) {
+      if (!byId.has(p.id)) byId.set(p.id, p);
+    }
+  } catch {
+    /* no pages */
   }
   return [...byId.values()];
 }
@@ -448,13 +514,83 @@ async function managedPageListsReelId(
 export const FACEBOOK_SELECT_PAGE_HANDLE = "Select your Facebook Page";
 
 const FACEBOOK_NO_PAGES_REFRESH_ERROR =
-  "No Facebook Page granted. Disconnect, connect again, and select the Page where you publish Reels.";
+  "No Facebook Page granted. Disconnect, reconnect, select your Page in Meta’s dialog, and ensure the Page app has business_management + pages_show_list (App Review).";
+
+export type MetaLinkedPage = { id: string; name: string };
+
+export function metaLinkedPagesToJson(pages: FbManagedPage[]): MetaLinkedPage[] {
+  return pages.map((p) => ({ id: p.id, name: p.name?.trim() || p.id }));
+}
+
+export function parseMetaLinkedPagesJson(json: unknown): MetaLinkedPage[] | undefined {
+  if (!Array.isArray(json)) return undefined;
+  const out: MetaLinkedPage[] = [];
+  for (const row of json) {
+    if (row && typeof row === "object" && "id" in row) {
+      const id = String((row as { id: unknown }).id);
+      const nameRaw = (row as { name?: unknown }).name;
+      out.push({ id, name: typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : id });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
 
 function formatFacebookPageDisplayHandle(pages: FbManagedPage[]): string {
   if (pages.length === 0) return FACEBOOK_SELECT_PAGE_HANDLE;
   const first = pages[0].name?.trim() || pages[0].id;
   if (pages.length === 1) return first;
   return `${first} +${pages.length - 1} more`;
+}
+
+type GranularScopeRow = { scope?: string; target_ids?: string[] };
+
+async function fetchGranularPageIdsFromToken(
+  userAccessToken: string,
+  kind: MetaAppKind,
+): Promise<string[]> {
+  const { appId, appSecret } = metaAppCredentials(kind);
+  if (!appId || !appSecret) return [];
+  try {
+    const json = (await graphGet("/debug_token", {
+      input_token: userAccessToken,
+      access_token: `${appId}|${appSecret}`,
+    })) as { data?: { granular_scopes?: GranularScopeRow[] } };
+    const ids = new Set<string>();
+    for (const g of json.data?.granular_scopes ?? []) {
+      for (const id of g.target_ids ?? []) {
+        if (id) ids.add(id);
+      }
+    }
+    return [...ids];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveManagedPagesFromIds(
+  pageIds: string[],
+  userAccessToken: string,
+): Promise<FbManagedPage[]> {
+  const rows: FbManagedPage[] = [];
+  for (const pageId of pageIds) {
+    try {
+      const json = (await graphGet(`/${pageId}`, {
+        fields: "id,name,access_token",
+        access_token: userAccessToken,
+      })) as { id?: string; name?: string; access_token?: string };
+      const id = json.id ?? pageId;
+      let pageAccessToken = json.access_token;
+      if (!pageAccessToken) {
+        pageAccessToken = (await fetchPageAccessTokenForUser(id, userAccessToken)) ?? undefined;
+      }
+      if (pageAccessToken) {
+        rows.push({ id, name: json.name, access_token: pageAccessToken });
+      }
+    } catch {
+      /* skip page */
+    }
+  }
+  return rows;
 }
 
 function facebookLinkageLooksIncomplete(row: {
@@ -505,6 +641,7 @@ export async function syncFacebookPageLinkage(userId: string): Promise<void> {
       data: {
         linkStatus: "pending_page",
         displayHandle: FACEBOOK_SELECT_PAGE_HANDLE,
+        linkedPagesJson: Prisma.JsonNull,
         lastRefreshError: FACEBOOK_NO_PAGES_REFRESH_ERROR,
       },
     });
@@ -516,9 +653,29 @@ export async function syncFacebookPageLinkage(userId: string): Promise<void> {
     data: {
       linkStatus: "connected",
       displayHandle: formatFacebookPageDisplayHandle(pages),
+      linkedPagesJson: metaLinkedPagesToJson(pages),
       lastRefreshError: null,
     },
   });
+}
+
+type FbVideoInsightRow = {
+  name?: string;
+  values?: Array<{ value?: number | Record<string, number> }>;
+};
+
+function extractReelPlaysFromInsightsPayload(
+  json: { data?: FbVideoInsightRow[] },
+): bigint | null {
+  const rows = json.data ?? [];
+  for (const metric of FACEBOOK_REEL_VIEW_METRICS) {
+    const row = rows.find((r) => r.name === metric) ?? (rows.length === 1 ? rows[0] : undefined);
+    const raw = row?.values?.[0]?.value;
+    if (typeof raw === "number" && raw >= 0) {
+      return BigInt(Math.floor(raw));
+    }
+  }
+  return null;
 }
 
 async function fetchFacebookVideoInsightPlays(
@@ -531,15 +688,25 @@ async function fetchFacebookVideoInsightPlays(
         metric,
         period: "lifetime",
         access_token: accessToken,
-      })) as { data?: Array<{ values?: Array<{ value?: number }> }> };
-      const v = json.data?.[0]?.values?.[0]?.value;
-      if (typeof v === "number" && v >= 0) {
-        return BigInt(Math.floor(v));
-      }
+      })) as { data?: FbVideoInsightRow[] };
+      const plays = extractReelPlaysFromInsightsPayload(json);
+      if (plays != null) return plays;
     } catch {
       /* try next metric */
     }
   }
+
+  try {
+    const json = (await graphGet(`/${videoId}/video_insights`, {
+      period: "lifetime",
+      access_token: accessToken,
+    })) as { data?: FbVideoInsightRow[] };
+    const plays = extractReelPlaysFromInsightsPayload(json);
+    if (plays != null) return plays;
+  } catch {
+    /* fall through */
+  }
+
   throw new AppError("facebook_video_insights_unavailable", 403);
 }
 
@@ -632,6 +799,27 @@ export async function fetchFacebookObjectStats(
 
   const pageIds = pages.map((p) => p.id);
   let sawPersonalReel = false;
+
+  /** If video_insights works with a Page token, that Page can access the Reel (same as Graph Explorer). */
+  for (const page of pages) {
+    try {
+      const views = await fetchFacebookVideoInsightPlays(objectId, page.access_token);
+      let engagement: { likes?: bigint; comments?: bigint } = {};
+      try {
+        const meta = await loadFacebookReelMeta(objectId, page.access_token);
+        if (meta.from?.id === me.id) {
+          sawPersonalReel = true;
+          continue;
+        }
+        engagement = engagementFromMeta(meta);
+      } catch {
+        /* plays count is enough; engagement is optional */
+      }
+      return { views, ...engagement };
+    } catch (e) {
+      if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
+    }
+  }
 
   for (const page of pages) {
     let meta: FbReelMeta | null = null;

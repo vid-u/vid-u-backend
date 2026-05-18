@@ -4,10 +4,8 @@ import { sendSuccess } from "../utils/api-response.js";
 import { paramString } from "../lib/params.js";
 import type { Platform } from "../generated/prisma/enums.js";
 import type { PatchMeBodyDto, PutMeRoleBodyDto } from "../validation/me.schema.js";
-import {
-  effectiveFacebookLinkStatus,
-  syncFacebookPageLinkage,
-} from "../services/meta-platform.service.js";
+import { syncFacebookPageLinkage } from "../services/meta-platform.service.js";
+import { mapCreatorPlatformLinkDto } from "../services/session-profile.service.js";
 import {
   buildMeResponseData,
   completeMeOnboarding,
@@ -51,12 +49,7 @@ export async function getMePlatforms(req: Request, res: Response): Promise<void>
   }
   const rows = await listMePlatformAccounts(userId);
   sendSuccess(res, {
-    platformLinks: rows.map((r) => ({
-      platform: r.platform,
-      displayHandle: r.displayHandle,
-      linkStatus: effectiveFacebookLinkStatus(r),
-      connectedAt: r.connectedAt?.toISOString() ?? null,
-    })),
+    platformLinks: rows.map(mapCreatorPlatformLinkDto),
   });
 }
 

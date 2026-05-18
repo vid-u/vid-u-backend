@@ -317,6 +317,20 @@ export async function getMetaOAuthPageCallback(req: Request, res: Response): Pro
       accessToken: long.accessToken,
       expiresIn: long.expiresIn,
     });
+    const updated = await prisma.creatorPlatformAccount.findUnique({
+      where: { userId_platform: { userId: st.userId, platform: "facebook" } },
+    });
+    if (updated && metaFacebookOAuthNeedsPageStep(updated)) {
+      res.redirect(
+        302,
+        creatorPlatformOAuthRedirectUrl({
+          outcome: "error",
+          platform: "facebook",
+          reason: "facebook_no_pages_linked",
+        }),
+      );
+      return;
+    }
     res.redirect(
       302,
       creatorPlatformOAuthRedirectUrl({ outcome: "success", platform: "facebook" }),

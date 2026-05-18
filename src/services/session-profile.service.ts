@@ -3,7 +3,11 @@ import { prisma } from "../lib/prisma.js";
 import { publicUrlFromObjectKey } from "../lib/publicObjectUrl.js";
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import type { PutMeBrandProfileBodyDto } from "../validation/me-profile.schema.js";
-import { effectiveFacebookLinkStatus, syncFacebookPageLinkage } from "./meta-platform.service.js";
+import {
+  effectiveFacebookLinkStatus,
+  parseMetaLinkedPagesJson,
+  syncFacebookPageLinkage,
+} from "./meta-platform.service.js";
 import { syncBrandXenditSubAccountProfile } from "./xendit-platform.service.js";
 
 export function primaryRoleFromProfiles(
@@ -16,15 +20,24 @@ export function primaryRoleFromProfiles(
   return r;
 }
 
-function mapPlatformLinks(
-  rows: Awaited<ReturnType<typeof prisma.creatorPlatformAccount.findMany>>,
+export function mapCreatorPlatformLinkDto(
+  r: Awaited<ReturnType<typeof prisma.creatorPlatformAccount.findMany>>[number],
 ) {
-  return rows.map((r) => ({
+  return {
     platform: r.platform,
     displayHandle: r.displayHandle,
     linkStatus: effectiveFacebookLinkStatus(r),
     connectedAt: r.connectedAt?.toISOString() ?? null,
-  }));
+    ...(r.platform === "facebook"
+      ? { linkedPages: parseMetaLinkedPagesJson(r.linkedPagesJson) }
+      : {}),
+  };
+}
+
+function mapPlatformLinks(
+  rows: Awaited<ReturnType<typeof prisma.creatorPlatformAccount.findMany>>,
+) {
+  return rows.map(mapCreatorPlatformLinkDto);
 }
 
 export async function getMeProfilePayload(userId: string, role: UserRole) {

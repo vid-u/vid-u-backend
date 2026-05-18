@@ -178,6 +178,8 @@ model CreatorPlatformAccount {
   lastRefreshError      String?     @map("last_refresh_error")
   linkStatus            LinkStatus  @default(connected) @map("link_status")
   displayHandle         String      @map("display_handle")
+  /** Facebook Page id + name from last sync (tooltips in account UI). */
+  linkedPagesJson       Json?       @map("linked_pages_json")
   connectedAt           DateTime?   @map("connected_at")
   createdAt             DateTime    @default(now()) @map("created_at")
   updatedAt             DateTime    @updatedAt @map("updated_at")
