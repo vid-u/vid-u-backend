@@ -4,6 +4,9 @@ import { env } from "./env.js";
 
 export type OAuthStatePlatform = "tiktok" | "facebook";
 
+/** Meta dual-app: login (user_videos) then page (read_insights). */
+export type MetaOAuthPhase = "login" | "page";
+
 function stateSigningKey(): ReturnType<typeof createSecretKey> {
   if (env.OAUTH_STATE_SECRET && env.OAUTH_STATE_SECRET.length >= 32) {
     return createSecretKey(Buffer.from(env.OAUTH_STATE_SECRET, "utf8").subarray(0, 32));
@@ -24,17 +27,21 @@ export type OAuthStatePayload = {
   platform: OAuthStatePlatform;
   /** TikTok PKCE code_verifier (embedded so HTTPS tunnel callbacks work without a cookie). */
   codeVerifier?: string;
+  metaPhase?: MetaOAuthPhase;
 };
 
 export async function signOAuthState(
   userId: string,
   platform: OAuthStatePlatform,
-  options?: { codeVerifier?: string },
+  options?: { codeVerifier?: string; metaPhase?: MetaOAuthPhase },
 ): Promise<string> {
   const key = stateSigningKey();
   const claims: Record<string, string> = { sub: userId, p: platform };
   if (options?.codeVerifier) {
     claims.cv = options.codeVerifier;
+  }
+  if (options?.metaPhase) {
+    claims.mp = options.metaPhase;
   }
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "HS256" })
@@ -51,7 +58,9 @@ export async function verifyOAuthState(state: string | undefined): Promise<OAuth
     if (typeof payload.sub !== "string") return null;
     if (payload.p !== "tiktok" && payload.p !== "facebook") return null;
     const codeVerifier = typeof payload.cv === "string" ? payload.cv : undefined;
-    return { userId: payload.sub, platform: payload.p, codeVerifier };
+    const metaPhase =
+      payload.mp === "login" || payload.mp === "page" ? payload.mp : undefined;
+    return { userId: payload.sub, platform: payload.p, codeVerifier, metaPhase };
   } catch {
     return null;
   }

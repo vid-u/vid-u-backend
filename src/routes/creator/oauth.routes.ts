@@ -16,3 +16,10 @@ oauthRouter.get(
   asyncHandler(oauth.getMetaOAuthStart),
 );
 oauthRouter.get("/facebook/callback", asyncHandler(oauth.getMetaOAuthCallback));
+oauthRouter.get(
+  "/facebook/page/start",
+  requireAuth,
+  requireViduCreator,
+  asyncHandler(oauth.getMetaOAuthPageStart),
+);
+oauthRouter.get("/facebook/page/callback", asyncHandler(oauth.getMetaOAuthPageCallback));

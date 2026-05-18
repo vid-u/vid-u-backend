@@ -9,7 +9,7 @@ import {
 import {
   extractFacebookReelNumericId,
   fetchFacebookObjectStats,
-  getValidMetaUserAccessToken,
+  getValidMetaLoginAccessToken,
   isInstagramHost,
 } from "./meta-platform.service.js";
 
@@ -53,7 +53,7 @@ export async function fetchCreatorContentStats(
   }
 
   if (platform === "facebook") {
-    const token = await getValidMetaUserAccessToken(creatorUserId);
+    await getValidMetaLoginAccessToken(creatorUserId);
 
     if (isInstagramHost(url)) {
       throw new ValidationError("instagram_urls_not_supported_for_facebook_connect");
@@ -61,7 +61,7 @@ export async function fetchCreatorContentStats(
 
     const fbNumeric = extractFacebookReelNumericId(url);
     if (fbNumeric) {
-      return fetchFacebookObjectStats(fbNumeric, token);
+      return fetchFacebookObjectStats(fbNumeric, creatorUserId);
     }
 
     throw new ValidationError("unsupported_facebook_content_url");

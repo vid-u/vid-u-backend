@@ -10,52 +10,125 @@ function graphHost(): string {
   return `https://graph.facebook.com/${v}`;
 }
 
-export function getMetaRedirectUri(): string {
-  return env.META_REDIRECT_URI ?? `${getPublicApiUrl().replace(/\/$/, "")}/oauth/facebook/callback`;
+export type MetaAppKind = "login" | "page";
+
+const META_LOGIN_SCOPES_DEFAULT = ["public_profile", "user_videos", "user_posts"] as const;
+const META_PAGE_SCOPES_DEFAULT = [
+  "public_profile",
+  "pages_show_list",
+  "pages_read_engagement",
+  "read_insights",
+] as const;
+
+export function getMetaLoginAppId(): string {
+  return env.META_LOGIN_APP_ID ?? env.META_APP_ID ?? "";
 }
 
-export function assertMetaConfigured(): void {
-  if (!env.META_APP_ID || !env.META_APP_SECRET) {
-    throw new AppError("Meta OAuth is not configured (META_APP_ID / META_APP_SECRET)", 503);
+export function getMetaLoginAppSecret(): string {
+  return env.META_LOGIN_APP_SECRET ?? env.META_APP_SECRET ?? "";
+}
+
+export function getMetaPageAppId(): string {
+  return env.META_PAGE_APP_ID ?? "";
+}
+
+export function getMetaPageAppSecret(): string {
+  return env.META_PAGE_APP_SECRET ?? "";
+}
+
+export function isMetaDualAppEnabled(): boolean {
+  return Boolean(getMetaPageAppId() && getMetaPageAppSecret());
+}
+
+export function getMetaRedirectUri(kind: MetaAppKind): string {
+  const base = env.META_REDIRECT_URI ?? `${getPublicApiUrl().replace(/\/$/, "")}/oauth/facebook`;
+  const root = base.replace(/\/oauth\/facebook\/callback\/?$/i, "/oauth/facebook");
+  const path = kind === "page" ? `${root}/page/callback` : `${root}/callback`;
+  return path;
+}
+
+export function assertMetaLoginConfigured(): void {
+  if (!getMetaLoginAppId() || !getMetaLoginAppSecret()) {
+    throw new AppError(
+      "Meta Login OAuth is not configured (META_LOGIN_APP_ID / META_LOGIN_APP_SECRET or META_APP_ID / META_APP_SECRET)",
+      503,
+    );
   }
 }
 
-/**
- * Default scopes for a **Facebook Login** Meta app (Manage Page use case cannot be combined).
- * Override with env `META_OAUTH_SCOPES` when using a Page-only Meta app.
- */
-export const META_OAUTH_SCOPES_DEFAULT = [
-  "public_profile",
-  "user_videos",
-  "user_posts",
-] as const;
+export function assertMetaPageConfigured(): void {
+  if (!isMetaDualAppEnabled()) {
+    throw new AppError("Meta Page OAuth is not configured (META_PAGE_APP_ID / META_PAGE_APP_SECRET)", 503);
+  }
+}
 
-export function getMetaOAuthScopes(): string[] {
-  const raw = env.META_OAUTH_SCOPES?.trim();
-  if (!raw) return [...META_OAUTH_SCOPES_DEFAULT];
+/** @deprecated Use {@link assertMetaLoginConfigured}. */
+export function assertMetaConfigured(): void {
+  assertMetaLoginConfigured();
+}
+
+function parseScopeList(raw: string | undefined, fallback: readonly string[]): string[] {
+  if (!raw?.trim()) return [...fallback];
   return raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-/** @deprecated Use {@link getMetaOAuthScopes}; kept for docs/tests. */
-export const META_OAUTH_SCOPES = META_OAUTH_SCOPES_DEFAULT;
+export function getMetaLoginOAuthScopes(): string[] {
+  return parseScopeList(
+    env.META_LOGIN_OAUTH_SCOPES ?? env.META_OAUTH_SCOPES,
+    META_LOGIN_SCOPES_DEFAULT,
+  );
+}
 
-export function buildMetaAuthorizeUrl(state: string): string {
-  assertMetaConfigured();
-  const redirectUri = getMetaRedirectUri();
-  const scope = getMetaOAuthScopes().join(",");
+export function getMetaPageOAuthScopes(): string[] {
+  return parseScopeList(env.META_PAGE_OAUTH_SCOPES, META_PAGE_SCOPES_DEFAULT);
+}
+
+/** @deprecated Use {@link getMetaLoginOAuthScopes}. */
+export function getMetaOAuthScopes(): string[] {
+  return getMetaLoginOAuthScopes();
+}
+
+export const META_OAUTH_SCOPES_DEFAULT = META_LOGIN_SCOPES_DEFAULT;
+export const META_OAUTH_SCOPES = META_LOGIN_SCOPES_DEFAULT;
+
+function metaAppCredentials(kind: MetaAppKind): { appId: string; appSecret: string } {
+  if (kind === "page") {
+    return { appId: getMetaPageAppId(), appSecret: getMetaPageAppSecret() };
+  }
+  return { appId: getMetaLoginAppId(), appSecret: getMetaLoginAppSecret() };
+}
+
+export function buildMetaAuthorizeUrl(state: string, kind: MetaAppKind = "login"): string {
+  if (kind === "page") assertMetaPageConfigured();
+  else assertMetaLoginConfigured();
+
+  const { appId } = metaAppCredentials(kind);
+  const redirectUri = getMetaRedirectUri(kind);
+  const scope =
+    kind === "page" ? getMetaPageOAuthScopes().join(",") : getMetaLoginOAuthScopes().join(",");
   const dialogVersion = env.META_GRAPH_VERSION.startsWith("v")
     ? env.META_GRAPH_VERSION
     : `v${env.META_GRAPH_VERSION}`;
   const authUrl = new URL(`https://www.facebook.com/${dialogVersion}/dialog/oauth`);
-  authUrl.searchParams.set("client_id", env.META_APP_ID!);
+  authUrl.searchParams.set("client_id", appId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("state", state);
   return authUrl.href;
+}
+
+/** Starts dual-app connect with the Facebook Login app. */
+export function buildMetaLoginAuthorizeUrl(state: string): string {
+  return buildMetaAuthorizeUrl(state, "login");
+}
+
+/** Second step when META_PAGE_APP_* is set. */
+export function buildMetaPageAuthorizeUrl(state: string): string {
+  return buildMetaAuthorizeUrl(state, "page");
 }
 
 type GraphErr = { error?: { message?: string; type?: string } };
@@ -90,15 +163,17 @@ async function graphGet(path: string, params: Record<string, string>): Promise<u
   return json;
 }
 
-export async function exchangeMetaShortLivedCode(code: string): Promise<{
-  accessToken: string;
-  expiresIn: number;
-}> {
-  assertMetaConfigured();
-  const redirectUri = getMetaRedirectUri();
+export async function exchangeMetaShortLivedCode(
+  code: string,
+  kind: MetaAppKind = "login",
+): Promise<{ accessToken: string; expiresIn: number }> {
+  if (kind === "page") assertMetaPageConfigured();
+  else assertMetaLoginConfigured();
+  const { appId, appSecret } = metaAppCredentials(kind);
+  const redirectUri = getMetaRedirectUri(kind);
   const json = (await graphGet("/oauth/access_token", {
-    client_id: env.META_APP_ID!,
-    client_secret: env.META_APP_SECRET!,
+    client_id: appId,
+    client_secret: appSecret,
     redirect_uri: redirectUri,
     code,
   })) as { access_token?: string; expires_in?: number };
@@ -106,15 +181,15 @@ export async function exchangeMetaShortLivedCode(code: string): Promise<{
   return { accessToken: json.access_token, expiresIn: json.expires_in ?? 3600 };
 }
 
-export async function exchangeMetaLongLivedUserToken(shortLived: string): Promise<{
-  accessToken: string;
-  expiresIn: number;
-}> {
-  assertMetaConfigured();
+export async function exchangeMetaLongLivedUserToken(
+  shortLived: string,
+  kind: MetaAppKind = "login",
+): Promise<{ accessToken: string; expiresIn: number }> {
+  const { appId, appSecret } = metaAppCredentials(kind);
   const json = (await graphGet("/oauth/access_token", {
     grant_type: "fb_exchange_token",
-    client_id: env.META_APP_ID!,
-    client_secret: env.META_APP_SECRET!,
+    client_id: appId,
+    client_secret: appSecret,
     fb_exchange_token: shortLived,
   })) as { access_token?: string; expires_in?: number };
   if (!json.access_token) throw new AppError("Meta long-lived exchange failed", 502);
@@ -388,23 +463,27 @@ function isFacebookReelOwnedByCreator(
   return managedPageIds.includes(fromId);
 }
 
-/** User token first, then Page tokens. Separates not-owned vs insights-unavailable. */
+/** Login token + optional Page-app token + Page access tokens. */
 export async function fetchFacebookObjectStats(
   objectId: string,
-  userAccessToken: string,
+  creatorUserId: string,
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
-  const me = await fetchMetaMeUserId(userAccessToken);
+  const loginToken = await getValidMetaLoginAccessToken(creatorUserId);
+  const pageAppToken = await getValidMetaPageAccessTokenOptional(creatorUserId);
+  const me = await fetchMetaMeUserId(loginToken);
 
   let pages: Array<{ id?: string; access_token?: string }> = [];
+  const accountsToken = pageAppToken ?? loginToken;
   try {
-    pages = await listFacebookPages(userAccessToken);
+    pages = await listFacebookPages(accountsToken);
   } catch {
     /* token may lack pages_show_list */
   }
 
   const pageIds = pages.map((p) => p.id).filter((id): id is string => Boolean(id));
   const tokens = [
-    userAccessToken,
+    loginToken,
+    ...(pageAppToken ? [pageAppToken] : []),
     ...pages.map((p) => p.access_token).filter((t): t is string => Boolean(t)),
   ];
 
@@ -444,7 +523,7 @@ export async function fetchFacebookObjectStats(
   throw new AppError("facebook_reel_not_owned", 403);
 }
 
-export async function upsertMetaCreatorAccount(params: {
+export async function upsertMetaLoginToken(params: {
   userId: string;
   accessToken: string;
   expiresIn: number;
@@ -482,6 +561,39 @@ export async function upsertMetaCreatorAccount(params: {
   });
 }
 
+export async function upsertMetaPageToken(params: {
+  userId: string;
+  accessToken: string;
+  expiresIn: number;
+}): Promise<void> {
+  const exp = new Date(Date.now() + Math.max(300, params.expiresIn) * 1000);
+  const existing = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId: params.userId, platform: "facebook" } },
+  });
+  if (!existing) {
+    throw new AppError("creator_platform_not_connected", 403);
+  }
+  await prisma.creatorPlatformAccount.update({
+    where: { id: existing.id },
+    data: {
+      pageAccessTokenEncrypted: encryptSecret(params.accessToken),
+      pageTokenExpiresAt: exp,
+      linkStatus: "connected",
+      lastRefreshError: null,
+      lastRefreshedAt: new Date(),
+    },
+  });
+}
+
+/** @deprecated Use {@link upsertMetaLoginToken}. */
+export async function upsertMetaCreatorAccount(params: {
+  userId: string;
+  accessToken: string;
+  expiresIn: number;
+}): Promise<void> {
+  return upsertMetaLoginToken(params);
+}
+
 export async function markMetaReconnect(userId: string, err: string): Promise<void> {
   await prisma.creatorPlatformAccount.updateMany({
     where: { userId, platform: "facebook" },
@@ -489,11 +601,15 @@ export async function markMetaReconnect(userId: string, err: string): Promise<vo
   });
 }
 
-export async function getValidMetaUserAccessToken(userId: string): Promise<string> {
-  const row = await prisma.creatorPlatformAccount.findUnique({
-    where: { userId_platform: { userId, platform: "facebook" } },
-  });
-  if (!row) throw new AppError("creator_platform_not_connected", 403);
+async function refreshMetaLoginTokenRow(
+  row: {
+    id: string;
+    userId: string;
+    accessTokenEncrypted: string;
+    tokenExpiresAt: Date;
+    linkStatus: string;
+  },
+): Promise<string> {
   if (row.linkStatus === "reconnect") throw new AppError("platform_reconnect_required", 401);
 
   const token = decryptSecret(row.accessTokenEncrypted);
@@ -503,7 +619,7 @@ export async function getValidMetaUserAccessToken(userId: string): Promise<strin
   }
 
   try {
-    const next = await exchangeMetaLongLivedUserToken(token);
+    const next = await exchangeMetaLongLivedUserToken(token, "login");
     const exp = new Date(Date.now() + Math.max(300, next.expiresIn) * 1000);
     await prisma.creatorPlatformAccount.update({
       where: { id: row.id },
@@ -519,7 +635,82 @@ export async function getValidMetaUserAccessToken(userId: string): Promise<strin
     return next.accessToken;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await markMetaReconnect(userId, msg);
+    await markMetaReconnect(row.userId, msg);
     throw new AppError("platform_reconnect_required", 401);
   }
+}
+
+async function refreshMetaPageTokenRow(
+  row: {
+    id: string;
+    userId: string;
+    pageAccessTokenEncrypted: string | null;
+    pageTokenExpiresAt: Date | null;
+    linkStatus: string;
+  },
+): Promise<string> {
+  if (!row.pageAccessTokenEncrypted || !row.pageTokenExpiresAt) {
+    throw new AppError("meta_page_connect_required", 403);
+  }
+  if (row.linkStatus === "reconnect") throw new AppError("platform_reconnect_required", 401);
+
+  const token = decryptSecret(row.pageAccessTokenEncrypted);
+  const skewMs = 120_000;
+  if (row.pageTokenExpiresAt.getTime() > Date.now() + skewMs) {
+    return token;
+  }
+
+  try {
+    const next = await exchangeMetaLongLivedUserToken(token, "page");
+    const exp = new Date(Date.now() + Math.max(300, next.expiresIn) * 1000);
+    await prisma.creatorPlatformAccount.update({
+      where: { id: row.id },
+      data: {
+        pageAccessTokenEncrypted: encryptSecret(next.accessToken),
+        pageTokenExpiresAt: exp,
+        lastRefreshError: null,
+        lastRefreshedAt: new Date(),
+      },
+    });
+    return next.accessToken;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await markMetaReconnect(row.userId, msg);
+    throw new AppError("platform_reconnect_required", 401);
+  }
+}
+
+export async function getValidMetaLoginAccessToken(userId: string): Promise<string> {
+  const row = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId, platform: "facebook" } },
+  });
+  if (!row) throw new AppError("creator_platform_not_connected", 403);
+  return refreshMetaLoginTokenRow(row);
+}
+
+/** Page-app token when dual Meta apps are configured; null if single-app mode. */
+export async function getValidMetaPageAccessTokenOptional(
+  userId: string,
+): Promise<string | null> {
+  if (!isMetaDualAppEnabled()) return null;
+  const row = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId, platform: "facebook" } },
+  });
+  if (!row?.pageAccessTokenEncrypted) return null;
+  return refreshMetaPageTokenRow({
+    id: row.id,
+    userId: row.userId,
+    pageAccessTokenEncrypted: row.pageAccessTokenEncrypted,
+    pageTokenExpiresAt: row.pageTokenExpiresAt,
+    linkStatus: row.linkStatus,
+  });
+}
+
+/** @deprecated Use {@link getValidMetaLoginAccessToken}. */
+export async function getValidMetaUserAccessToken(userId: string): Promise<string> {
+  return getValidMetaLoginAccessToken(userId);
+}
+
+export function getMetaPageOAuthStartUrl(): string {
+  return `${getPublicApiUrl().replace(/\/$/, "")}/oauth/facebook/page/start`;
 }

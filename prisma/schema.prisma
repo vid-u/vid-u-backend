@@ -170,6 +170,9 @@ model CreatorPlatformAccount {
   accessTokenEncrypted  String      @map("access_token_encrypted")
   refreshTokenEncrypted String      @map("refresh_token_encrypted")
   tokenExpiresAt        DateTime    @map("token_expires_at")
+  /** Meta Page app user token (pages_show_list, read_insights); optional until 2nd OAuth step. */
+  pageAccessTokenEncrypted String?  @map("page_access_token_encrypted")
+  pageTokenExpiresAt       DateTime? @map("page_token_expires_at")
   lastRefreshedAt       DateTime?   @map("last_refreshed_at")
   lastRefreshError      String?     @map("last_refresh_error")
   linkStatus            LinkStatus  @default(connected) @map("link_status")

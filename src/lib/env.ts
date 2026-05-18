@@ -28,10 +28,18 @@ const envSchema = z.object({
 
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
+  /** Facebook Login app (personal Reels). Falls back to META_APP_ID / META_APP_SECRET. */
+  META_LOGIN_APP_ID: z.string().optional(),
+  META_LOGIN_APP_SECRET: z.string().optional(),
+  /** Manage Page app (insights + Page Reels). Dual-app when set with secrets. */
+  META_PAGE_APP_ID: z.string().optional(),
+  META_PAGE_APP_SECRET: z.string().optional(),
   META_GRAPH_VERSION: z.string().default("v21.0"),
   META_REDIRECT_URI: z.string().url().optional(),
-  /** Comma-separated OAuth scopes; must match permissions enabled on the Meta app. */
+  /** Comma-separated scopes for login app. Fallback when META_LOGIN_OAUTH_SCOPES unset. */
   META_OAUTH_SCOPES: z.string().optional(),
+  META_LOGIN_OAUTH_SCOPES: z.string().optional(),
+  META_PAGE_OAUTH_SCOPES: z.string().optional(),
 
   /** First 32 UTF-8 bytes used as HS256 key for OAuth `state` JWT (fallback: TOKEN_ENCRYPTION_KEY hex). */
   OAUTH_STATE_SECRET: z.string().min(32).optional(),

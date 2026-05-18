@@ -12,11 +12,16 @@ import {
   upsertTikTokCreatorAccount,
 } from "../services/tiktok-platform.service.js";
 import {
-  assertMetaConfigured,
-  buildMetaAuthorizeUrl,
+  assertMetaLoginConfigured,
+  assertMetaPageConfigured,
+  buildMetaLoginAuthorizeUrl,
+  buildMetaPageAuthorizeUrl,
   exchangeMetaLongLivedUserToken,
   exchangeMetaShortLivedCode,
-  upsertMetaCreatorAccount,
+  getMetaPageOAuthStartUrl,
+  isMetaDualAppEnabled,
+  upsertMetaLoginToken,
+  upsertMetaPageToken,
 } from "../services/meta-platform.service.js";
 
 const TIKTOK_PKCE_COOKIE = "vidu_tiktok_pkce_verifier";
@@ -48,7 +53,7 @@ export async function getTikTokOAuthStart(req: Request, res: Response): Promise<
   const { verifier, challenge } = generatePkcePair();
   const state = await signOAuthState(req.dbUser!.id, "tiktok", { codeVerifier: verifier });
   const authorizeUrl = buildTikTokAuthorizeUrl(state, challenge);
-  setTikTokPkceCookie(res, verifier); // fallback when redirect_uri is same host as /start
+  setTikTokPkceCookie(res, verifier);
   if (req.headers.accept?.includes("application/json")) {
     sendSuccess(res, { authorizeUrl });
     return;
@@ -144,10 +149,23 @@ export async function getTikTokOAuthCallback(req: Request, res: Response): Promi
   }
 }
 
+/** Step 1 (or only step): Facebook Login app — personal Reels. */
 export async function getMetaOAuthStart(req: Request, res: Response): Promise<void> {
-  assertMetaConfigured();
-  const state = await signOAuthState(req.dbUser!.id, "facebook");
-  const authorizeUrl = buildMetaAuthorizeUrl(state);
+  assertMetaLoginConfigured();
+  const state = await signOAuthState(req.dbUser!.id, "facebook", { metaPhase: "login" });
+  const authorizeUrl = buildMetaLoginAuthorizeUrl(state);
+  if (req.headers.accept?.includes("application/json")) {
+    sendSuccess(res, { authorizeUrl });
+    return;
+  }
+  res.redirect(302, authorizeUrl);
+}
+
+/** Step 2 when dual-app: Manage Page app — insights + Page Reels. */
+export async function getMetaOAuthPageStart(req: Request, res: Response): Promise<void> {
+  assertMetaPageConfigured();
+  const state = await signOAuthState(req.dbUser!.id, "facebook", { metaPhase: "page" });
+  const authorizeUrl = buildMetaPageAuthorizeUrl(state);
   if (req.headers.accept?.includes("application/json")) {
     sendSuccess(res, { authorizeUrl });
     return;
@@ -169,7 +187,7 @@ export async function getMetaOAuthCallback(req: Request, res: Response): Promise
     return;
   }
   const st = await verifyOAuthState(typeof q.state === "string" ? q.state : undefined);
-  if (!st || st.platform !== "facebook") {
+  if (!st || st.platform !== "facebook" || (st.metaPhase && st.metaPhase !== "login")) {
     res.redirect(
       302,
       creatorPlatformOAuthRedirectUrl({
@@ -193,9 +211,73 @@ export async function getMetaOAuthCallback(req: Request, res: Response): Promise
     return;
   }
   try {
-    const short = await exchangeMetaShortLivedCode(code);
-    const long = await exchangeMetaLongLivedUserToken(short.accessToken);
-    await upsertMetaCreatorAccount({
+    const short = await exchangeMetaShortLivedCode(code, "login");
+    const long = await exchangeMetaLongLivedUserToken(short.accessToken, "login");
+    await upsertMetaLoginToken({
+      userId: st.userId,
+      accessToken: long.accessToken,
+      expiresIn: long.expiresIn,
+    });
+
+    if (isMetaDualAppEnabled()) {
+      res.redirect(302, getMetaPageOAuthStartUrl());
+      return;
+    }
+
+    res.redirect(
+      302,
+      creatorPlatformOAuthRedirectUrl({ outcome: "success", platform: "facebook" }),
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "oauth_failed";
+    res.redirect(
+      302,
+      creatorPlatformOAuthRedirectUrl({ outcome: "error", platform: "facebook", reason: msg }),
+    );
+  }
+}
+
+export async function getMetaOAuthPageCallback(req: Request, res: Response): Promise<void> {
+  const q = req.query as Record<string, string | undefined>;
+  if (q.error) {
+    res.redirect(
+      302,
+      creatorPlatformOAuthRedirectUrl({
+        outcome: "error",
+        platform: "facebook",
+        reason: q.error_description ?? q.error,
+      }),
+    );
+    return;
+  }
+  const st = await verifyOAuthState(typeof q.state === "string" ? q.state : undefined);
+  if (!st || st.platform !== "facebook" || st.metaPhase !== "page") {
+    res.redirect(
+      302,
+      creatorPlatformOAuthRedirectUrl({
+        outcome: "error",
+        platform: "facebook",
+        reason: "invalid_state",
+      }),
+    );
+    return;
+  }
+  const code = typeof q.code === "string" ? q.code : undefined;
+  if (!code) {
+    res.redirect(
+      302,
+      creatorPlatformOAuthRedirectUrl({
+        outcome: "error",
+        platform: "facebook",
+        reason: "missing_code",
+      }),
+    );
+    return;
+  }
+  try {
+    const short = await exchangeMetaShortLivedCode(code, "page");
+    const long = await exchangeMetaLongLivedUserToken(short.accessToken, "page");
+    await upsertMetaPageToken({
       userId: st.userId,
       accessToken: long.accessToken,
       expiresIn: long.expiresIn,
