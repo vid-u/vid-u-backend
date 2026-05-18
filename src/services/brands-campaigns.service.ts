@@ -12,7 +12,7 @@ import {
 } from "./brand-refund.service.js";
 import { netBudgetFromGross, toDecimal } from "../utils/money.js";
 import { maybeAutoPauseCampaign } from "./auto-pause.service.js";
-import { publicUrlFromObjectKey, resolveObjectDisplayUrl } from "../lib/publicObjectUrl.js";
+import { resolveObjectDisplayUrls } from "../lib/publicObjectUrl.js";
 import { brandCampaignFundingRedirectUrl } from "../lib/frontendOrigin.js";
 import { createXenditInvoice } from "./xendit-invoice.service.js";
 import { reconcileMissedInitialXenditSetup } from "./xendit-platform.service.js";
@@ -88,7 +88,7 @@ async function computeCampaignDto(campaignId: string) {
     referenceLinks: c.referenceLinks,
     assetUrls: c.assetUrls,
     coverImageObjectKey: c.coverImageObjectKey,
-    coverImageUrl: await resolveObjectDisplayUrl(c.coverImageObjectKey),
+    ...(await coverImageUrlsForDto(c.coverImageObjectKey)),
     netBudget: balances.netBudget,
     reservedBudget: balances.reservedBudget,
     payoutPoolBudget: balances.payoutPoolBudget,
@@ -98,6 +98,14 @@ async function computeCampaignDto(campaignId: string) {
     xenditPoolSettled,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+  };
+}
+
+async function coverImageUrlsForDto(coverImageObjectKey: string | null) {
+  const { url, fallbackUrl } = await resolveObjectDisplayUrls(coverImageObjectKey);
+  return {
+    coverImageUrl: url,
+    coverImageFallbackUrl: fallbackUrl,
   };
 }
 
@@ -124,7 +132,8 @@ function mapBrandCampaignCard(c: {
     title: c.title,
     description: c.description,
     coverImageObjectKey: c.coverImageObjectKey,
-    coverImageUrl: publicUrlFromObjectKey(c.coverImageObjectKey),
+    coverImageUrl: null as string | null,
+    coverImageFallbackUrl: null as string | null,
     goalViews: c.goalViews.toString(),
     fundedViewsTotal: fundedTotal.toString(),
     platforms: c.platforms,
@@ -150,13 +159,10 @@ export async function listBrandCampaignCardsForUser(brandUserId: string) {
   });
   const cards = rows.map(mapBrandCampaignCard);
   return Promise.all(
-    cards.map(async (card) => {
-      if (card.coverImageUrl || !card.coverImageObjectKey) return card;
-      return {
-        ...card,
-        coverImageUrl: await resolveObjectDisplayUrl(card.coverImageObjectKey),
-      };
-    }),
+    cards.map(async (card) => ({
+      ...card,
+      ...(await coverImageUrlsForDto(card.coverImageObjectKey)),
+    })),
   );
 }
 

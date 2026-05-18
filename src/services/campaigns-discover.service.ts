@@ -1,7 +1,7 @@
 import type { CampaignStatus, SubmissionStatus } from "../generated/prisma/enums.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
-import { env } from "../lib/env.js";
+import { resolveObjectDisplayUrls } from "../lib/publicObjectUrl.js";
 import { netBudgetFromGross, toDecimal } from "../utils/money.js";
 import type { ListCampaignsQueryDto } from "../validation/campaigns-public.schema.js";
 
@@ -25,14 +25,21 @@ function decimalString(d: Prisma.Decimal): string {
   return d.toFixed(2);
 }
 
-function publicObjectUrl(objectKey: string | null | undefined): string | null {
-  if (!objectKey?.trim() || !env.PUBLIC_OBJECT_BASE_URL) return null;
-  const base = env.PUBLIC_OBJECT_BASE_URL.replace(/\/$/, "");
-  const key = objectKey.replace(/^\//, "");
-  return `${base}/${key}`;
-}
-
 const DISCOVER_STATUSES: CampaignStatus[] = ["active", "paused", "ended"];
+
+async function discoverMediaUrls(c: DiscoverRow) {
+  const logoKey = c.brand.brandProfile?.logoObjectKey ?? null;
+  const [cover, logo] = await Promise.all([
+    resolveObjectDisplayUrls(c.coverImageObjectKey),
+    resolveObjectDisplayUrls(logoKey),
+  ]);
+  return {
+    coverImageUrl: cover.url,
+    coverImageFallbackUrl: cover.fallbackUrl,
+    brandLogoUrl: logo.url,
+    brandLogoFallbackUrl: logo.fallbackUrl,
+  };
+}
 
 function statusFilter(status: ListCampaignsQueryDto["status"]): Prisma.EnumCampaignStatusFilter {
   if (status === "all") {
@@ -56,9 +63,10 @@ function discoverBudgetMetrics(c: DiscoverRow): { totalBudget: string; consumedB
 }
 
 /** Public list / marketing preview card — minimal fields + budget headline. */
-export function toDiscoverCampaignPreviewCard(c: DiscoverRow) {
+export async function toDiscoverCampaignPreviewCard(c: DiscoverRow) {
   const brandName = c.brand.brandProfile?.brandName ?? "Brand";
   const { totalBudget, consumedBudget } = discoverBudgetMetrics(c);
+  const media = await discoverMediaUrls(c);
   return {
     id: c.id,
     brandName,
@@ -66,8 +74,7 @@ export function toDiscoverCampaignPreviewCard(c: DiscoverRow) {
     description: c.description,
     status: c.status,
     platforms: c.platforms,
-    coverImageUrl: publicObjectUrl(c.coverImageObjectKey),
-    brandLogoUrl: publicObjectUrl(c.brand.brandProfile?.logoObjectKey ?? undefined),
+    ...media,
     totalBudget,
     consumedBudget,
     updatedAt: c.updatedAt.toISOString(),
@@ -75,9 +82,10 @@ export function toDiscoverCampaignPreviewCard(c: DiscoverRow) {
 }
 
 /** Public campaign detail — brief + rules/assets + budget headline (no gross / available breakdown). */
-export function toDiscoverCampaignPublicDetail(c: DiscoverRow) {
+export async function toDiscoverCampaignPublicDetail(c: DiscoverRow) {
   const brandName = c.brand.brandProfile?.brandName ?? "Brand";
   const { totalBudget, consumedBudget } = discoverBudgetMetrics(c);
+  const media = await discoverMediaUrls(c);
   return {
     id: c.id,
     brandName,
@@ -88,8 +96,7 @@ export function toDiscoverCampaignPublicDetail(c: DiscoverRow) {
     rules: c.rules,
     referenceLinks: c.referenceLinks,
     assetUrls: c.assetUrls,
-    coverImageUrl: publicObjectUrl(c.coverImageObjectKey),
-    brandLogoUrl: publicObjectUrl(c.brand.brandProfile?.logoObjectKey ?? undefined),
+    ...media,
     ratePer1k: decimalString(c.ratePer1k),
     totalBudget,
     consumedBudget,
@@ -115,7 +122,7 @@ export async function listDiscoverCampaigns(query: ListCampaignsQueryDto) {
     include: discoverInclude,
   });
 
-  return rows.map((r) => toDiscoverCampaignPreviewCard(r));
+  return Promise.all(rows.map((r) => toDiscoverCampaignPreviewCard(r)));
 }
 
 export async function getDiscoverCampaignById(id: string) {

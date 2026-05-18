@@ -61,7 +61,7 @@ Example production:
 
 - **Auth:** creator JWT.
 - **Query (optional):** `status` = `all` | `active` | `paused` | `ended` (default `all` — excludes `draft`); `platform` = `tiktok` | `facebook`; `sort` = `newest` | `highest_rate` (default `newest`).
-- **Response:** `data.items` (max 50), `data.limit` (50), `data.filters` (echo of resolved query). Cards include `brandName`, `status`, `grossBudget`, `spentBudget`, `availableBudget`, optional `coverImageUrl` / `brandLogoUrl` when `PUBLIC_OBJECT_BASE_URL` is set.
+- **Response:** `data.items` (max 50), `data.limit` (50), `data.filters` (echo of resolved query). Cards include `brandName`, `status`, `grossBudget`, `spentBudget`, `availableBudget`, and `coverImageUrl` / `brandLogoUrl` (public CDN URL when `PUBLIC_OBJECT_BASE_URL` is set, otherwise short-lived signed R2 GET URLs when R2 is configured).
 
 ## Payment methods
 
@@ -72,7 +72,7 @@ Example production:
 
 - **`POST /uploads/presign`** (brand JWT): body `purpose` (`brand_logo` | `campaign_cover`), `contentType` (`image/jpeg` | `image/png` | `image/webp`), and **`campaignId`** when `purpose` is `campaign_cover` (must be a campaign owned by the caller). Returns `uploadUrl`, `objectKey`, optional `publicUrl` (when `PUBLIC_OBJECT_BASE_URL` is set), `method`, `expiresIn`, `maxBytes`, and `headers` the browser must send on `PUT` (at least **`Content-Type`**).
 - **R2 (all required for presign to work):** `R2_S3_ENDPOINT` (e.g. `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`), `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` from an R2 **S3 API** token in the Cloudflare dashboard. If any are missing, presign returns **503**.
-- **`PUBLIC_OBJECT_BASE_URL`:** public origin (no trailing slash) used to build **`publicUrl`** and campaign card URLs; configure your R2 bucket or CDN so objects at `objectKey` are readable at that origin. When unset, the API returns **short-lived signed GET URLs** for brand campaign covers (list/detail) so local dev still shows images.
+- **`PUBLIC_OBJECT_BASE_URL`:** public origin (no trailing slash) used to build **`publicUrl`** and campaign card URLs; configure your R2 bucket or CDN so objects at `objectKey` are readable at that origin. When set **and** R2 is configured, list/detail responses include **`coverImageUrl`** (public) and **`coverImageFallbackUrl`** (signed GET, ~1h); the webapp uses the fallback on image load errors (e.g. dev public URL rate limits). When unset, only signed URLs are returned in **`coverImageUrl`**.
 - **R2 bucket CORS (required for browser cover upload):** In Cloudflare R2 → your bucket → **Settings → CORS**, allow `PUT` from your SPA origins (e.g. `http://localhost:5173`, `https://www.app.vid-u.com`). Example rule: methods `PUT`, `GET`, `HEAD`; allowed origins your `FRONTEND_URL` entries; allowed headers `Content-Type`. Without this, `POST /uploads/presign` succeeds but the browser **`PUT` to `uploadUrl` fails** (Network tab shows the storage request in red).
 - **Tuning (optional env, defaults in `src/config/uploads-r2.ts`):** `UPLOAD_PRESIGN_EXPIRES_SEC`, `UPLOAD_MAX_BYTES` (client-side expectation; enforce size in bucket policy / WAF as well).
 
