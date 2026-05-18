@@ -335,7 +335,7 @@ async function fetchFacebookVideoInsightPlays(
       /* try next metric */
     }
   }
-  throw new AppError("facebook_video_insights_unavailable", 502);
+  throw new AppError("facebook_video_insights_unavailable", 403);
 }
 
 function engagementFromMeta(meta: FbEngagement): {
@@ -353,90 +353,95 @@ function engagementFromMeta(meta: FbEngagement): {
   };
 }
 
-async function fetchFacebookReelStatsWithToken(
-  reelId: string,
-  accessToken: string,
-): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
-  let meta: FbReelMeta | null = null;
-
+async function loadFacebookReelMeta(reelId: string, accessToken: string): Promise<FbReelMeta> {
   try {
-    meta = (await graphGet(`/${reelId}`, {
+    const meta = (await graphGet(`/${reelId}`, {
       fields: "id,from{id},permalink_url,likes.summary(true),comments.summary(true)",
       access_token: accessToken,
     })) as FbReelMeta;
+    if (!meta.id) throw new AppError("facebook_object_not_found", 404);
+    return meta;
   } catch (e) {
     const retryAsPost =
       e instanceof AppError &&
       (e.message === "facebook_reel_not_accessible" ||
         e.message === "facebook_object_not_found");
     if (!retryAsPost) throw e;
-    meta = (await graphGet(`/${reelId}`, {
+    const meta = (await graphGet(`/${reelId}`, {
       fields:
         "id,from{id},permalink_url,reactions.summary(true),comments.summary(true)",
       access_token: accessToken,
     })) as FbReelMeta;
+    if (!meta.id) throw new AppError("facebook_object_not_found", 404);
+    return meta;
   }
-
-  if (!meta?.id) throw new AppError("facebook_object_not_found", 404);
-
-  const views = await fetchFacebookVideoInsightPlays(reelId, accessToken);
-  const engagement = engagementFromMeta(meta);
-  return { views, ...engagement };
 }
 
-function pickFacebookReelFetchError(errors: AppError[]): AppError {
-  for (const code of [
-    "meta_read_insights_required",
-    "facebook_no_pages_linked",
-    "facebook_video_insights_unavailable",
-    "facebook_object_not_found",
-    "facebook_reel_not_accessible",
-  ]) {
-    const hit = errors.find((e) => e.message === code);
-    if (hit) return hit;
-  }
-  return errors[errors.length - 1] ?? new AppError("facebook_reel_not_accessible", 403);
+function isFacebookReelOwnedByCreator(
+  meta: FbReelMeta,
+  creatorUserId: string,
+  managedPageIds: string[],
+): boolean {
+  const fromId = meta.from?.id;
+  if (!fromId) return true;
+  if (fromId === creatorUserId) return true;
+  return managedPageIds.includes(fromId);
 }
 
-/** User token first (Facebook Login app), then Page tokens when `pages_show_list` was granted. */
+/** User token first, then Page tokens. Separates not-owned vs insights-unavailable. */
 export async function fetchFacebookObjectStats(
   objectId: string,
   userAccessToken: string,
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
-  const errors: AppError[] = [];
+  const me = await fetchMetaMeUserId(userAccessToken);
 
-  try {
-    return await fetchFacebookReelStatsWithToken(objectId, userAccessToken);
-  } catch (e) {
-    if (e instanceof AppError) {
-      if (e.message === "meta_read_insights_required") throw e;
-      errors.push(e);
-    }
-  }
-
-  let pages: Array<{ access_token?: string }> = [];
+  let pages: Array<{ id?: string; access_token?: string }> = [];
   try {
     pages = await listFacebookPages(userAccessToken);
   } catch {
     /* token may lack pages_show_list */
   }
 
-  for (const page of pages) {
-    if (!page.access_token) continue;
+  const pageIds = pages.map((p) => p.id).filter((id): id is string => Boolean(id));
+  const tokens = [
+    userAccessToken,
+    ...pages.map((p) => p.access_token).filter((t): t is string => Boolean(t)),
+  ];
+
+  let confirmedOwned = false;
+  let sawForeignOwner = false;
+
+  for (const token of tokens) {
+    let meta: FbReelMeta;
     try {
-      return await fetchFacebookReelStatsWithToken(objectId, page.access_token);
+      meta = await loadFacebookReelMeta(objectId, token);
     } catch (e) {
-      if (e instanceof AppError) {
-        if (e.message === "meta_read_insights_required") throw e;
-        errors.push(e);
-      }
+      if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
+      continue;
+    }
+
+    if (!isFacebookReelOwnedByCreator(meta, me.id, pageIds)) {
+      sawForeignOwner = true;
+      continue;
+    }
+
+    confirmedOwned = true;
+    try {
+      const views = await fetchFacebookVideoInsightPlays(objectId, token);
+      return { views, ...engagementFromMeta(meta) };
+    } catch (e) {
+      if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
+      /* try next token for insights */
     }
   }
 
-  if (pages.filter((p) => p.access_token).length === 0 && errors.length > 0) {
-    throw pickFacebookReelFetchError(errors);
+  if (confirmedOwned) {
+    throw new AppError("facebook_video_insights_unavailable", 403);
   }
-  throw pickFacebookReelFetchError(errors);
+  if (sawForeignOwner) {
+    throw new AppError("facebook_reel_not_owned", 403);
+  }
+  throw new AppError("facebook_reel_not_owned", 403);
 }
 
 export async function upsertMetaCreatorAccount(params: {
