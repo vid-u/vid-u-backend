@@ -20,8 +20,19 @@ export function assertMetaConfigured(): void {
   }
 }
 
-/** Must match permissions added under Facebook Login in the Meta app dashboard. */
-export const META_OAUTH_SCOPES = ["public_profile", "user_videos", "user_posts"] as const;
+/**
+ * Must match permissions added under Facebook Login in the Meta app dashboard.
+ * Personal Reels: user token + user_videos / user_posts + read_insights.
+ * Page Reels: Page token from /me/accounts + read_insights.
+ */
+export const META_OAUTH_SCOPES = [
+  "public_profile",
+  "user_videos",
+  "user_posts",
+  "pages_show_list",
+  "pages_read_engagement",
+  "read_insights",
+] as const;
 
 export function buildMetaAuthorizeUrl(state: string): string {
   assertMetaConfigured();
@@ -41,6 +52,15 @@ export function buildMetaAuthorizeUrl(state: string): string {
 
 type GraphErr = { error?: { message?: string; type?: string } };
 
+function mapMetaGraphMessageToCode(message: string): string | null {
+  const m = message.toLowerCase();
+  if (m.includes("read_insights")) return "meta_read_insights_required";
+  if (m.includes("unsupported get request") || m.includes("does not exist")) {
+    return "facebook_reel_not_accessible";
+  }
+  return null;
+}
+
 async function graphGet(path: string, params: Record<string, string>): Promise<unknown> {
   const u = new URL(`${graphHost()}${path.startsWith("/") ? path : `/${path}`}`);
   for (const [k, v] of Object.entries(params)) {
@@ -49,7 +69,15 @@ async function graphGet(path: string, params: Record<string, string>): Promise<u
   const r = await fetch(u.href);
   const json = (await r.json()) as GraphErr & Record<string, unknown>;
   if (!r.ok || json.error) {
-    throw new AppError(`Meta Graph error: ${json.error?.message ?? r.statusText}`, 502);
+    const raw = json.error?.message ?? r.statusText;
+    const code = mapMetaGraphMessageToCode(raw);
+    if (code === "meta_read_insights_required") {
+      throw new AppError(code, 403);
+    }
+    if (code) {
+      throw new AppError(code, 403);
+    }
+    throw new AppError(`Meta Graph error: ${raw}`, 502);
   }
   return json;
 }
@@ -254,26 +282,153 @@ export async function fetchInstagramMediaStats(
   };
 }
 
+const FACEBOOK_REEL_VIEW_METRICS = [
+  "fb_reels_total_plays",
+  "blue_reels_play_count",
+  "total_video_impressions",
+  "total_video_views",
+] as const;
+
+type FbEngagement = {
+  likes?: { summary?: { total_count?: number } };
+  comments?: { summary?: { total_count?: number } };
+  reactions?: { summary?: { total_count?: number } };
+};
+
+type FbReelMeta = { id?: string; from?: { id?: string } } & FbEngagement;
+
+async function listFacebookPages(
+  userAccessToken: string,
+): Promise<Array<{ id?: string; access_token?: string }>> {
+  const json = (await graphGet("/me/accounts", {
+    fields: "id,name,access_token",
+    access_token: userAccessToken,
+    limit: "50",
+  })) as { data?: Array<{ id?: string; access_token?: string }> };
+  return json.data ?? [];
+}
+
+async function fetchFacebookVideoInsightPlays(
+  videoId: string,
+  accessToken: string,
+): Promise<bigint> {
+  for (const metric of FACEBOOK_REEL_VIEW_METRICS) {
+    try {
+      const json = (await graphGet(`/${videoId}/video_insights`, {
+        metric,
+        period: "lifetime",
+        access_token: accessToken,
+      })) as { data?: Array<{ values?: Array<{ value?: number }> }> };
+      const v = json.data?.[0]?.values?.[0]?.value;
+      if (typeof v === "number" && v >= 0) {
+        return BigInt(Math.floor(v));
+      }
+    } catch {
+      /* try next metric */
+    }
+  }
+  throw new AppError("facebook_video_insights_unavailable", 502);
+}
+
+function engagementFromMeta(meta: FbEngagement): {
+  likes?: bigint;
+  comments?: bigint;
+} {
+  const likes =
+    meta.likes?.summary?.total_count ?? meta.reactions?.summary?.total_count;
+  return {
+    likes: likes != null ? BigInt(likes) : undefined,
+    comments:
+      meta.comments?.summary?.total_count != null
+        ? BigInt(meta.comments.summary.total_count)
+        : undefined,
+  };
+}
+
+async function fetchFacebookReelStatsWithToken(
+  reelId: string,
+  accessToken: string,
+  options?: { requireOwnerUserId?: string },
+): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
+  let meta: FbReelMeta | null = null;
+
+  try {
+    meta = (await graphGet(`/${reelId}`, {
+      fields: "id,from{id},permalink_url,likes.summary(true),comments.summary(true)",
+      access_token: accessToken,
+    })) as FbReelMeta;
+  } catch (e) {
+    const retryAsPost =
+      e instanceof AppError &&
+      (e.message === "facebook_reel_not_accessible" ||
+        e.message === "facebook_object_not_found");
+    if (!retryAsPost) throw e;
+    meta = (await graphGet(`/${reelId}`, {
+      fields:
+        "id,from{id},permalink_url,reactions.summary(true),comments.summary(true)",
+      access_token: accessToken,
+    })) as FbReelMeta;
+  }
+
+  if (!meta?.id) throw new AppError("facebook_object_not_found", 404);
+
+  const ownerId = options?.requireOwnerUserId;
+  if (ownerId && meta.from?.id && meta.from.id !== ownerId) {
+    throw new AppError("facebook_reel_not_owned", 403);
+  }
+
+  const views = await fetchFacebookVideoInsightPlays(reelId, accessToken);
+  const engagement = engagementFromMeta(meta);
+  return { views, ...engagement };
+}
+
+function pickFacebookReelFetchError(errors: AppError[]): AppError {
+  for (const code of [
+    "meta_read_insights_required",
+    "facebook_reel_not_owned",
+    "facebook_video_insights_unavailable",
+    "facebook_object_not_found",
+    "facebook_reel_not_accessible",
+  ]) {
+    const hit = errors.find((e) => e.message === code);
+    if (hit) return hit;
+  }
+  return errors[errors.length - 1] ?? new AppError("facebook_reel_not_accessible", 403);
+}
+
+/** Personal profile Reels (user token) and Page Reels (Page tokens). */
 export async function fetchFacebookObjectStats(
   objectId: string,
   userAccessToken: string,
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
-  const fields = "id,permalink_url,from";
-  const json = (await graphGet(`/${objectId}`, {
-    fields,
-    access_token: userAccessToken,
-  })) as { id?: string };
-  if (!json.id) throw new AppError("facebook_object_not_found", 404);
+  const me = await fetchMetaMeUserId(userAccessToken);
+  const errors: AppError[] = [];
 
-  const insightJson = (await graphGet(`/${objectId}/video_insights`, {
-    metric: "total_video_impressions",
-    access_token: userAccessToken,
-  })) as { data?: Array<{ values?: Array<{ value?: number }> }> };
-  const v = insightJson.data?.[0]?.values?.[0]?.value;
-  if (typeof v === "number") {
-    return { views: BigInt(Math.floor(v)), likes: undefined, comments: undefined };
+  try {
+    return await fetchFacebookReelStatsWithToken(objectId, userAccessToken, {
+      requireOwnerUserId: me.id,
+    });
+  } catch (e) {
+    if (e instanceof AppError) {
+      if (e.message === "meta_read_insights_required") throw e;
+      errors.push(e);
+    }
   }
-  throw new AppError("facebook_video_insights_unavailable", 502);
+
+  const pages = await listFacebookPages(userAccessToken);
+  for (const page of pages) {
+    if (!page.access_token) continue;
+    try {
+      return await fetchFacebookReelStatsWithToken(objectId, page.access_token);
+    } catch (e) {
+      if (e instanceof AppError) {
+        if (e.message === "meta_read_insights_required") throw e;
+        errors.push(e);
+      }
+    }
+  }
+
+  throw pickFacebookReelFetchError(errors);
 }
 
 export async function upsertMetaCreatorAccount(params: {

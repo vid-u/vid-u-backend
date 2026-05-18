@@ -48,13 +48,15 @@ export async function assertCampaignActiveForSubmission(campaignId: string): Pro
 }
 
 export type SubmissionPreviewCachedPayload = {
-  eligible: true;
+  eligible: boolean;
   views: string;
   likes?: string;
   comments?: string;
   issues: string[];
   cached: boolean;
 };
+
+const SUBMISSION_PREVIEW_MIN_VIEWS = 1000n;
 
 export async function runSubmissionPreview(
   creatorUserId: string,
@@ -66,12 +68,14 @@ export async function runSubmissionPreview(
 
   const cached = getCachedSubmissionPreview(creatorUserId, body.url, body.platform as Platform);
   if (cached) {
+    const views = BigInt(cached.views);
+    const eligible = views >= SUBMISSION_PREVIEW_MIN_VIEWS;
     return {
-      eligible: true,
+      eligible,
       views: cached.views,
       likes: cached.likes,
       comments: cached.comments,
-      issues: [],
+      issues: eligible ? [] : ["below_minimum_views"],
       cached: true,
     };
   }
@@ -81,9 +85,6 @@ export async function runSubmissionPreview(
     body.platform as Platform,
     creatorUserId,
   );
-  if (stats.views < 1000n) {
-    throw new ValidationError("Views must exceed 1k threshold for MVP preview");
-  }
 
   const payload = {
     views: stats.views.toString(),
@@ -92,10 +93,11 @@ export async function runSubmissionPreview(
   };
   setCachedSubmissionPreview(creatorUserId, body.url, body.platform as Platform, payload);
 
+  const eligible = stats.views >= SUBMISSION_PREVIEW_MIN_VIEWS;
   return {
-    eligible: true,
+    eligible,
     ...payload,
-    issues: [],
+    issues: eligible ? [] : ["below_minimum_views"],
     cached: false,
   };
 }
