@@ -21,23 +21,31 @@ export function assertMetaConfigured(): void {
 }
 
 /**
- * Must match permissions added under Facebook Login in the Meta app dashboard.
- * Personal Reels: user token + user_videos / user_posts + read_insights.
- * Page Reels: Page token from /me/accounts + read_insights.
+ * Default scopes for a **Facebook Login** Meta app (Manage Page use case cannot be combined).
+ * Override with env `META_OAUTH_SCOPES` when using a Page-only Meta app.
  */
-export const META_OAUTH_SCOPES = [
+export const META_OAUTH_SCOPES_DEFAULT = [
   "public_profile",
   "user_videos",
   "user_posts",
-  "pages_show_list",
-  "pages_read_engagement",
-  "read_insights",
 ] as const;
+
+export function getMetaOAuthScopes(): string[] {
+  const raw = env.META_OAUTH_SCOPES?.trim();
+  if (!raw) return [...META_OAUTH_SCOPES_DEFAULT];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** @deprecated Use {@link getMetaOAuthScopes}; kept for docs/tests. */
+export const META_OAUTH_SCOPES = META_OAUTH_SCOPES_DEFAULT;
 
 export function buildMetaAuthorizeUrl(state: string): string {
   assertMetaConfigured();
   const redirectUri = getMetaRedirectUri();
-  const scope = META_OAUTH_SCOPES.join(",");
+  const scope = getMetaOAuthScopes().join(",");
   const dialogVersion = env.META_GRAPH_VERSION.startsWith("v")
     ? env.META_GRAPH_VERSION
     : `v${env.META_GRAPH_VERSION}`;
@@ -348,7 +356,6 @@ function engagementFromMeta(meta: FbEngagement): {
 async function fetchFacebookReelStatsWithToken(
   reelId: string,
   accessToken: string,
-  options?: { requireOwnerUserId?: string },
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
   let meta: FbReelMeta | null = null;
 
@@ -372,11 +379,6 @@ async function fetchFacebookReelStatsWithToken(
 
   if (!meta?.id) throw new AppError("facebook_object_not_found", 404);
 
-  const ownerId = options?.requireOwnerUserId;
-  if (ownerId && meta.from?.id && meta.from.id !== ownerId) {
-    throw new AppError("facebook_reel_not_owned", 403);
-  }
-
   const views = await fetchFacebookVideoInsightPlays(reelId, accessToken);
   const engagement = engagementFromMeta(meta);
   return { views, ...engagement };
@@ -385,7 +387,7 @@ async function fetchFacebookReelStatsWithToken(
 function pickFacebookReelFetchError(errors: AppError[]): AppError {
   for (const code of [
     "meta_read_insights_required",
-    "facebook_reel_not_owned",
+    "facebook_no_pages_linked",
     "facebook_video_insights_unavailable",
     "facebook_object_not_found",
     "facebook_reel_not_accessible",
@@ -396,18 +398,15 @@ function pickFacebookReelFetchError(errors: AppError[]): AppError {
   return errors[errors.length - 1] ?? new AppError("facebook_reel_not_accessible", 403);
 }
 
-/** Personal profile Reels (user token) and Page Reels (Page tokens). */
+/** User token first (Facebook Login app), then Page tokens when `pages_show_list` was granted. */
 export async function fetchFacebookObjectStats(
   objectId: string,
   userAccessToken: string,
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
-  const me = await fetchMetaMeUserId(userAccessToken);
   const errors: AppError[] = [];
 
   try {
-    return await fetchFacebookReelStatsWithToken(objectId, userAccessToken, {
-      requireOwnerUserId: me.id,
-    });
+    return await fetchFacebookReelStatsWithToken(objectId, userAccessToken);
   } catch (e) {
     if (e instanceof AppError) {
       if (e.message === "meta_read_insights_required") throw e;
@@ -415,7 +414,13 @@ export async function fetchFacebookObjectStats(
     }
   }
 
-  const pages = await listFacebookPages(userAccessToken);
+  let pages: Array<{ access_token?: string }> = [];
+  try {
+    pages = await listFacebookPages(userAccessToken);
+  } catch {
+    /* token may lack pages_show_list */
+  }
+
   for (const page of pages) {
     if (!page.access_token) continue;
     try {
@@ -428,6 +433,9 @@ export async function fetchFacebookObjectStats(
     }
   }
 
+  if (pages.filter((p) => p.access_token).length === 0 && errors.length > 0) {
+    throw pickFacebookReelFetchError(errors);
+  }
   throw pickFacebookReelFetchError(errors);
 }
 

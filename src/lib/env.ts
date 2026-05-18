@@ -30,6 +30,8 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().optional(),
   META_GRAPH_VERSION: z.string().default("v21.0"),
   META_REDIRECT_URI: z.string().url().optional(),
+  /** Comma-separated OAuth scopes; must match permissions enabled on the Meta app. */
+  META_OAUTH_SCOPES: z.string().optional(),
 
   /** First 32 UTF-8 bytes used as HS256 key for OAuth `state` JWT (fallback: TOKEN_ENCRYPTION_KEY hex). */
   OAUTH_STATE_SECRET: z.string().min(32).optional(),
