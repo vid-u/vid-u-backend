@@ -1,5 +1,4 @@
 import type { Platform } from "../generated/prisma/enums.js";
-import { prisma } from "../lib/prisma.js";
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import {
   extractTikTokVideoId,
@@ -10,12 +9,8 @@ import {
 import {
   extractFacebookReelNumericId,
   fetchFacebookObjectStats,
-  fetchInstagramMediaStats,
-  findInstagramMediaByPermalink,
   getValidMetaUserAccessToken,
   isInstagramHost,
-  normalizeInstagramOrFacebookContentUrl,
-  resolveMetaPageContextForUserToken,
 } from "./meta-platform.service.js";
 
 /** Stable dedupe key stored on `Submission.normalizedUrl`. */
@@ -58,26 +53,10 @@ export async function fetchCreatorContentStats(
   }
 
   if (platform === "facebook") {
-    const row = await prisma.creatorPlatformAccount.findUnique({
-      where: { userId_platform: { userId: creatorUserId, platform: "facebook" } },
-    });
-    if (!row) {
-      throw new ForbiddenError("creator_platform_not_connected");
-    }
     const token = await getValidMetaUserAccessToken(creatorUserId);
 
     if (isInstagramHost(url)) {
-      const target = normalizeInstagramOrFacebookContentUrl(url);
-      const ctx = await resolveMetaPageContextForUserToken(token, row.providerUserId);
-      const media = await findInstagramMediaByPermalink({
-        igUserId: ctx.igUserId,
-        pageAccessToken: ctx.pageAccessToken,
-        targetPermalinkNormalized: target,
-      });
-      if (!media?.id) {
-        throw new ForbiddenError("instagram_media_not_found_or_not_owned");
-      }
-      return fetchInstagramMediaStats(media.id, ctx.pageAccessToken, media);
+      throw new ValidationError("instagram_urls_not_supported_for_facebook_connect");
     }
 
     const fbNumeric = extractFacebookReelNumericId(url);

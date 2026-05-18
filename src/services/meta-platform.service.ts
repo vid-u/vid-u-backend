@@ -20,16 +20,13 @@ export function assertMetaConfigured(): void {
   }
 }
 
+/** Must match permissions added under Facebook Login in the Meta app dashboard. */
+export const META_OAUTH_SCOPES = ["public_profile", "user_videos", "user_posts"] as const;
+
 export function buildMetaAuthorizeUrl(state: string): string {
   assertMetaConfigured();
   const redirectUri = getMetaRedirectUri();
-  const scope = [
-    "public_profile",
-    "pages_show_list",
-    "pages_read_engagement",
-    "instagram_basic",
-    "instagram_manage_insights",
-  ].join(",");
+  const scope = META_OAUTH_SCOPES.join(",");
   const dialogVersion = env.META_GRAPH_VERSION.startsWith("v")
     ? env.META_GRAPH_VERSION
     : `v${env.META_GRAPH_VERSION}`;
@@ -285,9 +282,8 @@ export async function upsertMetaCreatorAccount(params: {
   expiresIn: number;
 }): Promise<void> {
   const me = await fetchMetaMeUserId(params.accessToken);
-  const ig = await pickPrimaryInstagramBusiness(params.accessToken);
-  const providerUserId = ig?.igUserId ?? me.id;
-  const displayHandle = ig?.username ?? me.name ?? me.id;
+  const providerUserId = me.id;
+  const displayHandle = me.name ?? me.id;
   const exp = new Date(Date.now() + Math.max(300, params.expiresIn) * 1000);
 
   await prisma.creatorPlatformAccount.upsert({
