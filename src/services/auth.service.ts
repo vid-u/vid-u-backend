@@ -53,13 +53,16 @@ export async function verifyEmailOtp(
 export async function startGoogleOAuth(res: Response): Promise<void> {
   assertSupabaseConfigured();
   const { verifier, challenge } = generatePkcePair();
-  const redirectUri = `${getPublicApiUrl()}/auth/google/callback`;
-  const state = await signGoogleOAuthState(verifier);
-  logger.info("Google OAuth start", { redirectUri });
+  const callbackBase = `${getPublicApiUrl()}/auth/google/callback`;
+  // Do NOT set Supabase `state` — it manages CSRF state itself (custom state → bad_oauth_state).
+  // Carry PKCE verifier on redirect_to so callback works when the PKCE cookie is missing.
+  const pkceRef = await signGoogleOAuthState(verifier);
+  const redirectTo = new URL(callbackBase);
+  redirectTo.searchParams.set("pkce", pkceRef);
+  logger.info("Google OAuth start", { redirectUri: callbackBase });
   const authorize = new URL(`${env.SUPABASE_URL}/auth/v1/authorize`);
   authorize.searchParams.set("provider", "google");
-  authorize.searchParams.set("redirect_to", redirectUri);
-  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("redirect_to", redirectTo.toString());
   authorize.searchParams.set("code_challenge", challenge);
   authorize.searchParams.set("code_challenge_method", "S256");
   authorize.searchParams.set("response_type", "code");

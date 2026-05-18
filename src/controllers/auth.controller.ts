@@ -71,12 +71,14 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   }
 
   const code = typeof q.code === "string" ? q.code : "";
-  const stateVerifier = await verifyGoogleOAuthState(typeof q.state === "string" ? q.state : undefined);
+  const pkceRefVerifier = await verifyGoogleOAuthState(
+    typeof q.pkce === "string" ? q.pkce : undefined,
+  );
   const cookieVerifier =
     typeof req.cookies?.[googlePkceCookieName] === "string"
       ? req.cookies[googlePkceCookieName]
       : undefined;
-  const verifier = stateVerifier ?? cookieVerifier;
+  const verifier = pkceRefVerifier ?? cookieVerifier;
 
   if (!code) {
     clearGooglePkceCookie(res);
@@ -87,7 +89,7 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   if (!verifier) {
     clearGooglePkceCookie(res);
     logger.warn("Google OAuth missing PKCE verifier", {
-      hasState: Boolean(q.state),
+      hasPkceRef: Boolean(q.pkce),
       hasCookie: Boolean(cookieVerifier),
     });
     res.redirect(302, `${base}/auth?oauth=error&reason=missing_pkce_verifier`);
@@ -104,7 +106,7 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
     }
     logger.info("Google OAuth succeeded", {
       requiresRoleSelection: session.requiresRoleSelection,
-      pkceFromState: Boolean(stateVerifier),
+      pkceFromRedirect: Boolean(pkceRefVerifier),
     });
     res.redirect(302, url.toString());
   } catch (err) {

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "ce10724d-0bb1-446b-a867-460f22813a01",
     "name": "VidU Backend API",
-    "description": "Public reference for the **VidU** HTTP API.\n\n**Success envelope:** `{ \"success\": true, \"message\": string, \"data\": \u2026 }`. Optional top-level **`meta`** only appears on explicitly paginated endpoints.\n\n**Errors:** `{ \"success\": false, \"message\": string }`. **Validation** (Zod) may add `{ \"errors\": { \"fieldErrors\", \"formErrors\" } }`.\n\n**Money:** amounts are **decimal strings** (PHP, two fractional digits) unless noted.\n\n**Timestamps:** ISO-8601 UTC strings.\n\n**Layout:** top-level **Me** (shared Profile / Payment methods / Platforms / creator submissions inbox), **Brand** (nested **Campaigns** + **Submissions** \u2192 `brand/campaign.routes.ts`, `brand/submissions.routes.ts`), **Creator** (nested **Campaigns** + **Submissions** + **OAuth** \u2192 `creator/campaign.routes.ts`, `creator/submissions.routes.ts`, `creator/oauth.routes.ts`), then **Webhooks**, **Uploads**, **Admin**.\n\n**Auth:** Supabase JWT as `Authorization: Bearer <access_token>`. Use **`brandBearerToken`** for `/brands/...`. **`GET /campaigns` and `GET /campaigns/:id` are public** (no Bearer). Use **`creatorBearerToken`** for authenticated creator routes under `/campaigns` (e.g. submission preview/confirm) and other creator flows.\n\nExample bodies are **illustrative**; replace UUIDs and values with your environment.\n\n**Ledger:** no in-process reconciler cron \u2014 use `POST /admin/reconcile-campaign/:campaignId` with HTTP **Basic** auth (`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`).",
+    "description": "Public reference for the **VidU** HTTP API.\n\n**Success envelope:** `{ \"success\": true, \"message\": string, \"data\": \u2026 }`. Optional top-level **`meta`** only appears on explicitly paginated endpoints.\n\n**Errors:** `{ \"success\": false, \"message\": string }`. **Validation** (Zod) may add `{ \"errors\": { \"fieldErrors\", \"formErrors\" } }`.\n\n**Money:** amounts are **decimal strings** (PHP, two fractional digits) unless noted.\n\n**Timestamps:** ISO-8601 UTC strings.\n\n**Layout:** top-level **Me** (shared Profile / Payment methods / Platforms / creator submissions inbox), **Brand** (nested **Campaigns** + **Submissions** \u2192 `brand/campaign.routes.ts`, `brand/submissions.routes.ts`), **Creator** (nested **Campaigns** + **Submissions** + **OAuth** \u2192 `creator/campaign.routes.ts`, `creator/submissions.routes.ts`, `creator/oauth.routes.ts`), then **Webhooks**, **Uploads**, **Admin**.\n\n**Auth:** SPA uses httpOnly cookie **`vidu_session`** (Supabase access JWT) via `credentials: include`. Postman may use **`Authorization: Bearer <access_token>`** on `/me` and other routes. Use **`brandBearerToken`** for `/brands/...`. **`GET /campaigns` and `GET /campaigns/:id` are public** (no auth). Use **`creatorBearerToken`** for authenticated creator routes. Google OAuth: align **`PUBLIC_API_URL`**, Supabase redirect URL, and SPA **`VITE_API_URL`** (see **`GET /auth/google/config`**).\n\nExample bodies are **illustrative**; replace UUIDs and values with your environment.\n\n**Ledger:** no in-process reconciler cron \u2014 use `POST /admin/reconcile-campaign/:campaignId` with HTTP **Basic** auth (`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "17874373"
   },
@@ -438,7 +438,7 @@
                 "verify"
               ]
             },
-            "description": "Body: `email`, `code` (4\u20138 chars). Copy `data.sessionToken` into `brandBearerToken` or `creatorBearerToken`."
+            "description": "Body: `email`, `code` (4\u20138 chars). Sets httpOnly **`vidu_session`** cookie (not returned in JSON). Response: `data.requiresRoleSelection` only."
           },
           "response": [
             {
@@ -471,7 +471,62 @@
                     "verify"
                   ]
                 },
-                "description": "Body: `email`, `code` (4\u20138 chars). Copy `data.sessionToken` into `brandBearerToken` or `creatorBearerToken`."
+                "description": "Body: `email`, `code` (4\u20138 chars). Sets httpOnly **`vidu_session`** cookie (not returned in JSON). Response: `data.requiresRoleSelection` only."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Set-Cookie",
+                  "value": "vidu_session=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example; HttpOnly; Path=/"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"requiresRoleSelection\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/google/config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/google/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google",
+                "config"
+              ]
+            },
+            "description": "Read-only OAuth alignment check (no secrets). Compare `publicApiUrl` / `googleCallbackUrl` with deployed **`PUBLIC_API_URL`**, Supabase redirect allowlist, and SPA **`VITE_API_URL`**."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/google/config",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "google",
+                    "config"
+                  ]
+                },
+                "description": "Read-only OAuth alignment check (no secrets). Compare `publicApiUrl` / `googleCallbackUrl` with deployed **`PUBLIC_API_URL`**, Supabase redirect allowlist, and SPA **`VITE_API_URL`**."
               },
               "status": "OK",
               "code": 200,
@@ -483,7 +538,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"sessionToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example\",\n    \"refreshToken\": \"refresh_example\",\n    \"requiresRoleSelection\": true\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"message\": \"ok\",\n  \"data\": {\n    \"publicApiUrl\": \"http://localhost:3001\",\n    \"googleCallbackUrl\": \"http://localhost:3001/auth/google/callback\",\n    \"frontendRedirectBase\": \"http://localhost:5173\",\n    \"nodeEnv\": \"development\"\n  }\n}"
             }
           ]
         },
@@ -503,7 +558,7 @@
                 "start"
               ]
             },
-            "description": "Browser OAuth start (redirect / cookies)."
+            "description": "Browser-only. **302** to Supabase Google consent. Sets **`vidu_google_pkce_verifier`** cookie. `redirect_to` = `{PUBLIC_API_URL}/auth/google/callback?pkce=<signed_jwt>` (do **not** set Supabase `state` — Supabase owns CSRF `state`). Allowlist callback base URL in Supabase."
           },
           "response": []
         },
@@ -513,7 +568,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/auth/google/callback?code=AUTH_CODE&state=",
+              "raw": "{{baseUrl}}/auth/google/callback?code=AUTH_CODE&pkce=GOOGLE_PKCE_REF_JWT",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -525,15 +580,29 @@
               "query": [
                 {
                   "key": "code",
-                  "value": "AUTH_CODE"
+                  "value": "AUTH_CODE",
+                  "description": "From Supabase after Google consent"
                 },
                 {
-                  "key": "state",
-                  "value": ""
+                  "key": "pkce",
+                  "value": "GOOGLE_PKCE_REF_JWT",
+                  "description": "Signed PKCE ref from /google/start redirect_to (preferred over cookie). Do not confuse with Supabase `state`."
+                },
+                {
+                  "key": "error",
+                  "value": "",
+                  "description": "Provider error (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "error_description",
+                  "value": "",
+                  "description": "Provider error detail (optional)",
+                  "disabled": true
                 }
               ]
             },
-            "description": "Query: `code` (required), `state` optional. **302** redirect to frontend with `session_token` (not JSON)."
+            "description": "Supabase redirects here with `code` (+ our `pkce` query from `redirect_to`). Exchanges code (PKCE from `pkce` param or cookie), sets httpOnly **`vidu_session`**. **302** to `FRONTEND_URL` `/` or `/auth?oauth=error&reason=...`. `bad_oauth_state` means custom `state` was sent to Supabase \u2014 fixed by not setting `state`."
           },
           "response": []
         },
@@ -557,7 +626,7 @@
                 "sign-out"
               ]
             },
-            "description": "Optional Bearer. No body."
+            "description": "Clears **`vidu_session`** cookie. Optional Bearer. No body."
           },
           "response": [
             {
@@ -597,7 +666,7 @@
           ]
         }
       ],
-      "description": "Email OTP + Google OAuth."
+      "description": "Email OTP + Google OAuth. Session = httpOnly **`vidu_session`** (SPA `credentials: include`). Use **`GET /auth/google/config`** to verify `PUBLIC_API_URL` vs Supabase redirect URL vs SPA API base."
     },
     {
       "name": "Profile",

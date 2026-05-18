@@ -57,7 +57,7 @@ export async function verifyOAuthState(state: string | undefined): Promise<OAuth
   }
 }
 
-/** Guest Google login — PKCE in state when start/callback hosts differ (tunnel vs localhost). */
+/** Guest Google login — signed PKCE ref in `redirect_to?pkce=` (not Supabase `state`, which it owns). */
 export async function signGoogleOAuthState(codeVerifier: string): Promise<string> {
   const key = stateSigningKey();
   return new SignJWT({ p: "google", cv: codeVerifier })
