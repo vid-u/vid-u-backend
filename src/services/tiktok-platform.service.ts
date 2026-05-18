@@ -9,6 +9,13 @@ const TIKTOK_TOKEN = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_USER = "https://open.tiktokapis.com/v2/user/info/";
 const TIKTOK_VIDEO_QUERY = "https://open.tiktokapis.com/v2/video/query/";
 
+/** Must match scopes added in TikTok Developer Portal (Login Kit + product scopes). */
+export const TIKTOK_OAUTH_SCOPES = [
+  "user.info.basic",
+  "user.info.profile",
+  "video.list",
+] as const;
+
 export function getTikTokRedirectUri(): string {
   return env.TIKTOK_REDIRECT_URI ?? `${getPublicApiUrl().replace(/\/$/, "")}/oauth/tiktok/callback`;
 }
@@ -22,7 +29,7 @@ export function assertTikTokConfigured(): void {
 export function buildTikTokAuthorizeUrl(state: string, codeChallenge: string): string {
   assertTikTokConfigured();
   const redirectUri = getTikTokRedirectUri();
-  const scope = ["user.info.basic", "video.list"].join(",");
+  const scope = TIKTOK_OAUTH_SCOPES.join(",");
   const u = new URL(TIKTOK_AUTH);
   u.searchParams.set("client_key", env.TIKTOK_CLIENT_KEY!);
   u.searchParams.set("scope", scope);
@@ -123,11 +130,14 @@ type TikTokUserData = {
   user?: { open_id?: string; display_name?: string; username?: string };
 };
 
+/** `open_id`/`display_name` → `user.info.basic`; `username` → `user.info.profile`. */
+const TIKTOK_USER_INFO_FIELDS = ["open_id", "display_name", "username"] as const;
+
 export async function fetchTikTokUserProfile(accessToken: string): Promise<{
   openId: string;
   displayHandle: string;
 }> {
-  const fields = ["open_id", "display_name", "username"].join(",");
+  const fields = TIKTOK_USER_INFO_FIELDS.join(",");
   const u = new URL(TIKTOK_USER);
   u.searchParams.set("fields", fields);
   const r = await fetch(u.href, {
@@ -138,7 +148,10 @@ export async function fetchTikTokUserProfile(accessToken: string): Promise<{
   if (!r.ok || !user?.open_id) {
     throw new AppError(`TikTok user info failed: ${json.error?.message ?? r.statusText}`, 502);
   }
-  const displayHandle = (user.username ?? user.display_name ?? user.open_id).trim() || user.open_id;
+  const handle = user.username?.trim();
+  const displayHandle =
+    (handle ? (handle.startsWith("@") ? handle : `@${handle}`) : user.display_name?.trim()) ||
+    user.open_id;
   return { openId: user.open_id, displayHandle };
 }
 
