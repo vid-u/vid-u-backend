@@ -12,7 +12,10 @@ export function requestLogger(
     const ms = Date.now() - start;
     const path = req.originalUrl.split("?")[0] ?? req.path;
     const isAuthPath =
-      path.startsWith("/auth") || path === "/me" || path.startsWith("/me/");
+      path.startsWith("/auth") ||
+      path === "/me" ||
+      path.startsWith("/me/") ||
+      path.startsWith("/oauth/");
     const entry: Record<string, string | number | boolean | undefined> = {
       method: req.method,
       path,
@@ -23,6 +26,12 @@ export function requestLogger(
       const origin = req.get("origin");
       if (origin) entry.origin = origin;
       entry.hasSessionCookie = Boolean(req.cookies?.[SESSION_COOKIE_NAME]);
+    }
+    if (path.startsWith("/oauth/") && path.endsWith("/callback")) {
+      const q = req.query as Record<string, string | undefined>;
+      entry.hasOAuthCode = typeof q.code === "string";
+      entry.hasOAuthState = typeof q.state === "string";
+      if (q.error) entry.oauthProviderError = q.error;
     }
     logger.info("request", entry);
   });
