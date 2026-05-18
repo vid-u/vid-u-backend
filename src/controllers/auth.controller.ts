@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { clearSessionCookie, setSessionCookie } from "../lib/auth-cookie.js";
+import { clearSessionCookie, SESSION_COOKIE_NAME, setSessionCookie } from "../lib/auth-cookie.js";
 import { sendSuccess } from "../utils/api-response.js";
 import { verifyGoogleOAuthState } from "../lib/oauth-state.js";
 import { logger } from "../utils/logger.js";
@@ -12,11 +12,8 @@ import {
   verifyEmailOtp,
 } from "../services/auth.service.js";
 import { env, getPublicApiUrl } from "../lib/env.js";
-
-function oauthFrontendBase(): string {
-  const raw = env.FRONTEND_URL ?? "http://localhost:5173";
-  return raw.split(",")[0]!.trim().replace(/\/$/, "");
-}
+import { authRequestContext } from "../lib/auth-request-log.js";
+import { oauthFrontendBase } from "../lib/oauth-frontend.js";
 
 /** Read-only: verify deployed OAuth URL alignment (no secrets). */
 export function getGoogleOAuthConfig(_req: Request, res: Response): void {
@@ -43,7 +40,8 @@ export async function postEmailVerify(req: Request, res: Response): Promise<void
   });
 }
 
-export async function getGoogleStart(_req: Request, res: Response): Promise<void> {
+export async function getGoogleStart(req: Request, res: Response): Promise<void> {
+  logger.info("Google OAuth start request", authRequestContext(req));
   await startGoogleOAuth(res);
 }
 
@@ -51,10 +49,21 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   const base = oauthFrontendBase();
   const q = req.query as Record<string, string | undefined>;
 
+  const pkceParam = typeof q.pkce === "string" ? q.pkce : undefined;
+  const cookieVerifier =
+    typeof req.cookies?.[googlePkceCookieName] === "string"
+      ? req.cookies[googlePkceCookieName]
+      : undefined;
+
   logger.info("Google OAuth callback hit", {
+    ...authRequestContext(req),
     hasCode: Boolean(q.code),
     hasError: Boolean(q.error),
-    hasState: Boolean(q.state),
+    hasSupabaseState: Boolean(q.state),
+    hasPkceParam: Boolean(pkceParam),
+    pkceParamLength: pkceParam?.length,
+    hasPkceCookie: Boolean(cookieVerifier),
+    frontendRedirectBase: base,
   });
 
   if (q.error) {
@@ -71,17 +80,12 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   }
 
   const code = typeof q.code === "string" ? q.code : "";
-  const pkceRefVerifier = await verifyGoogleOAuthState(
-    typeof q.pkce === "string" ? q.pkce : undefined,
-  );
-  const cookieVerifier =
-    typeof req.cookies?.[googlePkceCookieName] === "string"
-      ? req.cookies[googlePkceCookieName]
-      : undefined;
+  const pkceRefVerifier = await verifyGoogleOAuthState(pkceParam);
   const verifier = pkceRefVerifier ?? cookieVerifier;
 
   if (!code) {
     clearGooglePkceCookie(res);
+    logger.warn("Google OAuth callback missing code", authRequestContext(req));
     res.redirect(302, `${base}/auth?oauth=error&reason=missing_code`);
     return;
   }
@@ -89,8 +93,10 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   if (!verifier) {
     clearGooglePkceCookie(res);
     logger.warn("Google OAuth missing PKCE verifier", {
-      hasPkceRef: Boolean(q.pkce),
-      hasCookie: Boolean(cookieVerifier),
+      ...authRequestContext(req),
+      pkceJwtValid: Boolean(pkceRefVerifier),
+      hasPkceParam: Boolean(pkceParam),
+      hasPkceCookie: Boolean(cookieVerifier),
     });
     res.redirect(302, `${base}/auth?oauth=error&reason=missing_pkce_verifier`);
     return;
@@ -104,9 +110,12 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
     if (session.requiresRoleSelection) {
       url.searchParams.set("requires_role", "1");
     }
-    logger.info("Google OAuth succeeded", {
+    logger.info("Google OAuth succeeded — redirecting to SPA", {
       requiresRoleSelection: session.requiresRoleSelection,
       pkceFromRedirect: Boolean(pkceRefVerifier),
+      pkceFromCookie: Boolean(cookieVerifier && !pkceRefVerifier),
+      redirectTo: url.toString(),
+      sessionCookieSet: true,
     });
     res.redirect(302, url.toString());
   } catch (err) {
@@ -117,7 +126,11 @@ export async function getGoogleCallback(req: Request, res: Response): Promise<vo
   }
 }
 
-export async function postSignOut(_req: Request, res: Response): Promise<void> {
+export async function postSignOut(req: Request, res: Response): Promise<void> {
+  logger.info("Auth sign-out", {
+    ...authRequestContext(req),
+    hadSessionCookie: Boolean(req.cookies?.[SESSION_COOKIE_NAME]),
+  });
   clearSessionCookie(res);
   sendSuccess(res, { ok: true });
 }

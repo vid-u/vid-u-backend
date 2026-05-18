@@ -2,6 +2,7 @@ import type { Response } from "express";
 import { getPublicApiUrl, env } from "../lib/env.js";
 import { signGoogleOAuthState } from "../lib/oauth-state.js";
 import { generatePkcePair } from "../lib/pkce.js";
+import { oauthFrontendBase } from "../lib/oauth-frontend.js";
 import { logger } from "../utils/logger.js";
 import { getSupabaseAnonClient, getSupabaseServiceClient } from "../lib/supabaseAuth.js";
 import { verifySupabaseJwt } from "../lib/supabase-auth.js";
@@ -59,7 +60,18 @@ export async function startGoogleOAuth(res: Response): Promise<void> {
   const pkceRef = await signGoogleOAuthState(verifier);
   const redirectTo = new URL(callbackBase);
   redirectTo.searchParams.set("pkce", pkceRef);
-  logger.info("Google OAuth start", { redirectUri: callbackBase });
+  const frontendBase = oauthFrontendBase();
+  logger.info("Google OAuth start", {
+    redirectUri: callbackBase,
+    redirectTo: redirectTo.toString(),
+    frontendRedirectBase: frontendBase,
+    pkceCookie: {
+      name: COOKIE_VERIFIER,
+      secure: env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAgeSec: COOKIE_MAX_AGE_MS / 1000,
+    },
+  });
   const authorize = new URL(`${env.SUPABASE_URL}/auth/v1/authorize`);
   authorize.searchParams.set("provider", "google");
   authorize.searchParams.set("redirect_to", redirectTo.toString());
@@ -100,6 +112,10 @@ export async function completeGoogleOAuth(
   });
   if (!res.ok) {
     const text = await res.text();
+    logger.error("Google OAuth token exchange failed", {
+      status: res.status,
+      bodyPreview: text.slice(0, 240),
+    });
     throw new Error(`Google token exchange failed: ${text}`);
   }
   const json = (await res.json()) as {
