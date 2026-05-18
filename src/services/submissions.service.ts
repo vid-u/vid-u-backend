@@ -278,6 +278,7 @@ function mapBrandSubmissionListItem(
     creatorNet: s.creatorNet.toFixed(2),
     partialReason: s.partialReason,
     status: s.status,
+    rejectionReason: s.rejectionReason,
     submittedAt: s.submittedAt.toISOString(),
   };
 }
