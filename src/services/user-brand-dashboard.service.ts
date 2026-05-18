@@ -20,7 +20,7 @@ function bigintStr(v: unknown): string {
   return String(v);
 }
 
-/** Headline stats for the brand dashboard (non-rejected submissions on this brand's campaigns). */
+/** Headline stats for the brand dashboard (paid submissions only — brand has released payout). */
 export async function getBrandDashboardStats(brandUserId: string): Promise<BrandDashboardStats> {
   const rows = await prisma.$queryRaw<
     Array<{
@@ -31,12 +31,11 @@ export async function getBrandDashboardStats(brandUserId: string): Promise<Brand
   >`
     SELECT
       (SELECT COUNT(*)::int FROM campaign WHERE brand_user_id = ${brandUserId}::uuid) AS total_campaigns,
-      COALESCE(SUM(s.funded_views), 0) AS total_reached,
-      COALESCE(SUM(s.gross_amount), 0) AS total_spent
+      COALESCE(SUM(s.funded_views) FILTER (WHERE s.status::text = 'paid'), 0) AS total_reached,
+      COALESCE(SUM(s.gross_amount) FILTER (WHERE s.status::text = 'paid'), 0) AS total_spent
     FROM submission s
     INNER JOIN campaign c ON c.id = s.campaign_id
     WHERE c.brand_user_id = ${brandUserId}::uuid
-      AND s.status::text <> 'rejected'
   `;
 
   const row = rows[0] ?? { total_campaigns: 0, total_reached: 0n, total_spent: 0 };

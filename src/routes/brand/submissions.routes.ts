@@ -33,3 +33,8 @@ brandSubmissionsRouter.post(
   validateBody(brandRejectSubmissionBodySchema),
   asyncHandler(brands.postBrandRejectSubmission),
 );
+brandSubmissionsRouter.post(
+  "/campaigns/:id/submissions/:submissionId/restore",
+  validateParams(brandRejectSubmissionParamsSchema),
+  asyncHandler(brands.postBrandRestoreSubmission),
+);

@@ -691,13 +691,17 @@ function extractReelPlaysFromInsightsPayload(
 }
 
 function extractReelReactionsFromInsightsRows(rows: FbVideoInsightRow[]): bigint | undefined {
-  const row = rows.find((r) => r.name === "post_video_likes_by_reaction_type");
+  const row =
+    rows.find((r) => r.name === "post_video_likes_by_reaction_type") ??
+    (rows.length === 1 ? rows[0] : undefined);
   const total = sumInsightValue(row?.values?.[0]?.value);
   return total ?? undefined;
 }
 
 function extractReelEngagementsFromInsightsRows(rows: FbVideoInsightRow[]): bigint | undefined {
-  const row = rows.find((r) => r.name === "post_video_social_actions");
+  const row =
+    rows.find((r) => r.name === "post_video_social_actions") ??
+    (rows.length === 1 ? rows[0] : undefined);
   const total = sumInsightValue(row?.values?.[0]?.value);
   return total ?? undefined;
 }
@@ -705,12 +709,55 @@ function extractReelEngagementsFromInsightsRows(rows: FbVideoInsightRow[]): bigi
 async function fetchFacebookVideoInsightsRows(
   videoId: string,
   accessToken: string,
+  metric?: string,
 ): Promise<FbVideoInsightRow[]> {
-  const json = (await graphGet(`/${videoId}/video_insights`, {
+  const params: Record<string, string> = {
     period: "lifetime",
     access_token: accessToken,
-  })) as { data?: FbVideoInsightRow[] };
+  };
+  if (metric) params.metric = metric;
+  const json = (await graphGet(`/${videoId}/video_insights`, params)) as {
+    data?: FbVideoInsightRow[];
+  };
   return json.data ?? [];
+}
+
+async function resolveReelReactionsFromInsights(
+  videoId: string,
+  accessToken: string,
+  bulkRows: FbVideoInsightRow[],
+): Promise<bigint | undefined> {
+  const fromBulk = extractReelReactionsFromInsightsRows(bulkRows);
+  if (fromBulk !== undefined) return fromBulk;
+  try {
+    const rows = await fetchFacebookVideoInsightsRows(
+      videoId,
+      accessToken,
+      "post_video_likes_by_reaction_type",
+    );
+    return extractReelReactionsFromInsightsRows(rows);
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveReelEngagementsFromInsights(
+  videoId: string,
+  accessToken: string,
+  bulkRows: FbVideoInsightRow[],
+): Promise<bigint | undefined> {
+  const fromBulk = extractReelEngagementsFromInsightsRows(bulkRows);
+  if (fromBulk !== undefined) return fromBulk;
+  try {
+    const rows = await fetchFacebookVideoInsightsRows(
+      videoId,
+      accessToken,
+      "post_video_social_actions",
+    );
+    return extractReelEngagementsFromInsightsRows(rows);
+  } catch {
+    return undefined;
+  }
 }
 
 export type FacebookReelStats = {
@@ -730,15 +777,19 @@ async function fetchFacebookReelStatsFromInsights(
     if (views == null) {
       throw new AppError("facebook_video_insights_unavailable", 403);
     }
-    return {
-      views,
-      reactions: extractReelReactionsFromInsightsRows(rows),
-      engagements: extractReelEngagementsFromInsightsRows(rows),
-    };
+    const [reactions, engagements] = await Promise.all([
+      resolveReelReactionsFromInsights(videoId, accessToken, rows),
+      resolveReelEngagementsFromInsights(videoId, accessToken, rows),
+    ]);
+    return { views, reactions, engagements };
   } catch (e) {
     if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
     const views = await fetchFacebookVideoInsightPlays(videoId, accessToken);
-    return { views };
+    const [reactions, engagements] = await Promise.all([
+      resolveReelReactionsFromInsights(videoId, accessToken, []),
+      resolveReelEngagementsFromInsights(videoId, accessToken, []),
+    ]);
+    return { views, reactions, engagements };
   }
 }
 

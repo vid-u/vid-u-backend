@@ -61,6 +61,15 @@ export async function postBrandRejectSubmission(req: Request, res: Response): Pr
   sendSuccess(res, { ok: true });
 }
 
+export async function postBrandRestoreSubmission(req: Request, res: Response): Promise<void> {
+  await brandCampaigns.restoreBrandSubmission(
+    req.dbUser!.id,
+    paramString(req.params.id),
+    paramString(req.params.submissionId),
+  );
+  sendSuccess(res, { ok: true });
+}
+
 export async function postCampaignRefund(req: Request, res: Response): Promise<void> {
   const out = await brandCampaigns.refundAvailableCampaignBalance(
     req.dbUser!.id,

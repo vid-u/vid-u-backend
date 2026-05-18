@@ -335,6 +335,34 @@ export async function rejectBrandSubmission(
   await maybeAutoPauseCampaign(s.campaignId);
 }
 
+export async function restoreBrandSubmission(
+  brandUserId: string,
+  campaignId: string,
+  submissionId: string,
+): Promise<void> {
+  const s = await prisma.submission.findFirst({
+    where: { id: submissionId, campaignId, campaign: { brandUserId } },
+  });
+  if (!s) throw new NotFoundError("Submission not found");
+  if (s.status !== "rejected") throw new ConflictError("submission_not_rejected");
+
+  const dup = await prisma.submission.findFirst({
+    where: {
+      creatorUserId: s.creatorUserId,
+      normalizedUrl: s.normalizedUrl,
+      id: { not: s.id },
+      NOT: { status: "rejected" },
+    },
+  });
+  if (dup) throw new ConflictError("duplicate_submission");
+
+  await prisma.submission.update({
+    where: { id: s.id },
+    data: { status: "pending", rejectionReason: null },
+  });
+  await maybeAutoPauseCampaign(s.campaignId);
+}
+
 export async function refundAvailableCampaignBalance(
   brandUserId: string,
   campaignId: string,

@@ -144,7 +144,7 @@ async function getBrandPerformanceByMonth(userId: string): Promise<BrandPerforma
     FROM submission s
     INNER JOIN campaign c ON c.id = s.campaign_id
     WHERE c.brand_user_id = ${userId}::uuid
-      AND s.status::text <> 'rejected'
+      AND s.status::text = 'paid'
     GROUP BY 1
     ORDER BY 1 ASC
     LIMIT 24
@@ -166,7 +166,7 @@ async function getBrandPerformanceByYear(userId: string): Promise<BrandPerforman
     FROM submission s
     INNER JOIN campaign c ON c.id = s.campaign_id
     WHERE c.brand_user_id = ${userId}::uuid
-      AND s.status::text <> 'rejected'
+      AND s.status::text = 'paid'
     GROUP BY 1
     ORDER BY 1 ASC
     LIMIT 10
