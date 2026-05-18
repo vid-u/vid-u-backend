@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import { getPublicApiUrl, env } from "../lib/env.js";
+import { signGoogleOAuthState } from "../lib/oauth-state.js";
 import { generatePkcePair } from "../lib/pkce.js";
 import { getSupabaseAnonClient, getSupabaseServiceClient } from "../lib/supabaseAuth.js";
 import { verifySupabaseJwt } from "../lib/supabase-auth.js";
@@ -48,13 +49,15 @@ export async function verifyEmailOtp(
   };
 }
 
-export function startGoogleOAuth(res: Response): void {
+export async function startGoogleOAuth(res: Response): Promise<void> {
   assertSupabaseConfigured();
   const { verifier, challenge } = generatePkcePair();
   const redirectUri = `${getPublicApiUrl()}/auth/google/callback`;
+  const state = await signGoogleOAuthState(verifier);
   const authorize = new URL(`${env.SUPABASE_URL}/auth/v1/authorize`);
   authorize.searchParams.set("provider", "google");
   authorize.searchParams.set("redirect_to", redirectUri);
+  authorize.searchParams.set("state", state);
   authorize.searchParams.set("code_challenge", challenge);
   authorize.searchParams.set("code_challenge_method", "S256");
   authorize.searchParams.set("response_type", "code");
@@ -76,7 +79,7 @@ export async function completeGoogleOAuth(
 ): Promise<{ accessToken: string; refreshToken: string | null; requiresRoleSelection: boolean }> {
   assertSupabaseConfigured();
   if (!verifier) {
-    throw new Error("Missing PKCE verifier cookie");
+    throw new Error("Missing PKCE verifier (OAuth state or cookie)");
   }
   const res = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
     method: "POST",

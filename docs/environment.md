@@ -23,7 +23,10 @@ Example production:
 - `SUPABASE_SERVICE_ROLE_KEY`: **server only**. Required to set `app_metadata.vidu_role` after `PUT /me/role` so JWTs carry the selected role. Do not expose to the browser.
 - **`SUPABASE_JWT_SECRET` (optional):** set **only** when your tokens are **HS256** signed with this secret (some local/emulator setups). When unset, the API uses **RS256** and fetches JWKS from `SUPABASE_JWKS_URL` if set, otherwise **`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`**.
 - **`SUPABASE_JWKS_URL` (optional):** override the JWKS URL. Typical hosted Supabase projects need **neither** `SUPABASE_JWT_SECRET` nor `SUPABASE_JWKS_URL`.
-- Configure **redirect URLs** in Supabase for Google OAuth: allow `PUBLIC_API_URL` + `/auth/google/callback` (or your deployed API host).
+- Configure **redirect URLs** in Supabase → Authentication → URL configuration → **Redirect URLs**:  
+  `https://YOUR-API-HOST/auth/google/callback` (must match `PUBLIC_API_URL` exactly, including scheme).
+- **Google login alignment (required):** the browser must use the **same API host** for `/auth/google/start`, `/auth/google/callback`, and SPA `GET /me` (`VITE_API_URL` = `PUBLIC_API_URL`). If they differ (e.g. start on `localhost:3001`, callback on ngrok), the session cookie is never set and `/me` returns 401. PKCE is also carried in signed `state` as a fallback when the callback cookie is missing.
+- If the SPA and API are on **different registrable domains** (not just subdomains of `vid-u.com`), set `AUTH_COOKIE_SAME_SITE=none` and serve both over HTTPS.
 
 ## Session cookie (SPA auth)
 
