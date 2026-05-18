@@ -21,6 +21,7 @@ import {
   exchangeMetaShortLivedCode,
   isMetaDualAppEnabled,
   metaFacebookOAuthNeedsPageStep,
+  syncFacebookPageLinkage,
   upsertMetaLoginToken,
   upsertMetaPageToken,
 } from "../services/meta-platform.service.js";
@@ -158,10 +159,11 @@ export async function getMetaOAuthStart(req: Request, res: Response): Promise<vo
   });
 
   let authorizeUrl: string;
-  if (metaFacebookOAuthNeedsPageStep(row)) {
+  if (row && metaFacebookOAuthNeedsPageStep(row)) {
     assertMetaPageConfigured();
     const state = await signOAuthState(userId, "facebook", { metaPhase: "page" });
-    authorizeUrl = buildMetaPageAuthorizeUrl(state, true);
+    const rerequest = Boolean(row.pageAccessTokenEncrypted);
+    authorizeUrl = buildMetaPageAuthorizeUrl(state, rerequest);
   } else {
     assertMetaLoginConfigured();
     const state = await signOAuthState(userId, "facebook", { metaPhase: "login" });
@@ -234,9 +236,25 @@ export async function getMetaOAuthCallback(req: Request, res: Response): Promise
     });
 
     if (isMetaDualAppEnabled()) {
+      try {
+        await syncFacebookPageLinkage(st.userId);
+      } catch {
+        /* proceed with redirect; user can retry Page OAuth */
+      }
+      const updated = await prisma.creatorPlatformAccount.findUnique({
+        where: { userId_platform: { userId: st.userId, platform: "facebook" } },
+      });
+      if (updated && metaFacebookOAuthNeedsPageStep(updated)) {
+        const outcome = updated.pageAccessTokenEncrypted ? "resume_page" : "pending_page";
+        res.redirect(
+          302,
+          creatorPlatformOAuthRedirectUrl({ outcome, platform: "facebook" }),
+        );
+        return;
+      }
       res.redirect(
         302,
-        creatorPlatformOAuthRedirectUrl({ outcome: "pending_page", platform: "facebook" }),
+        creatorPlatformOAuthRedirectUrl({ outcome: "success", platform: "facebook" }),
       );
       return;
     }

@@ -836,14 +836,19 @@ export async function getValidMetaLoginAccessToken(userId: string): Promise<stri
   return refreshMetaLoginTokenRow(row);
 }
 
-/** Page-app token when dual Meta apps are configured; null if single-app mode. */
-export function metaFacebookOAuthNeedsPageStep(row: {
-  accessTokenEncrypted: string;
-  pageAccessTokenEncrypted: string | null;
-} | null): boolean {
-  return Boolean(
-    row?.accessTokenEncrypted && isMetaDualAppEnabled() && !row.pageAccessTokenEncrypted,
-  );
+/** Route OAuth to the Page app (grant/re-grant Pages), not the Login app. */
+export function metaFacebookOAuthNeedsPageStep(
+  row: {
+    accessTokenEncrypted: string;
+    pageAccessTokenEncrypted: string | null;
+    linkStatus: string;
+    displayHandle: string;
+  } | null,
+): boolean {
+  if (!row?.accessTokenEncrypted || !isMetaDualAppEnabled()) return false;
+  if (!row.pageAccessTokenEncrypted) return true;
+  if (row.linkStatus === "pending_page") return true;
+  return facebookLinkageLooksIncomplete(row);
 }
 
 export function effectiveFacebookLinkStatus(row: {
