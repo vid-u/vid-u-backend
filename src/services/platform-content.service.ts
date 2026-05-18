@@ -7,9 +7,9 @@ import {
   resolveTikTokUrl,
 } from "./tiktok-platform.service.js";
 import {
+  assertFacebookReadyForSubmission,
   extractFacebookReelNumericId,
   fetchFacebookObjectStats,
-  getValidMetaLoginAccessToken,
   isInstagramHost,
 } from "./meta-platform.service.js";
 
@@ -53,7 +53,7 @@ export async function fetchCreatorContentStats(
   }
 
   if (platform === "facebook") {
-    await getValidMetaLoginAccessToken(creatorUserId);
+    await assertFacebookReadyForSubmission(creatorUserId);
 
     if (isInstagramHost(url)) {
       throw new ValidationError("instagram_urls_not_supported_for_facebook_connect");

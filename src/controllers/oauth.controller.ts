@@ -11,6 +11,7 @@ import {
   exchangeTikTokCode,
   upsertTikTokCreatorAccount,
 } from "../services/tiktok-platform.service.js";
+import { prisma } from "../lib/prisma.js";
 import {
   assertMetaLoginConfigured,
   assertMetaPageConfigured,
@@ -18,8 +19,8 @@ import {
   buildMetaPageAuthorizeUrl,
   exchangeMetaLongLivedUserToken,
   exchangeMetaShortLivedCode,
-  getMetaPageOAuthStartUrl,
   isMetaDualAppEnabled,
+  metaFacebookOAuthNeedsPageStep,
   upsertMetaLoginToken,
   upsertMetaPageToken,
 } from "../services/meta-platform.service.js";
@@ -149,11 +150,24 @@ export async function getTikTokOAuthCallback(req: Request, res: Response): Promi
   }
 }
 
-/** Step 1 (or only step): Facebook Login app — personal Reels. */
+/** Step 1, or resume step 2 if login already completed. */
 export async function getMetaOAuthStart(req: Request, res: Response): Promise<void> {
-  assertMetaLoginConfigured();
-  const state = await signOAuthState(req.dbUser!.id, "facebook", { metaPhase: "login" });
-  const authorizeUrl = buildMetaLoginAuthorizeUrl(state);
+  const userId = req.dbUser!.id;
+  const row = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId, platform: "facebook" } },
+  });
+
+  let authorizeUrl: string;
+  if (metaFacebookOAuthNeedsPageStep(row)) {
+    assertMetaPageConfigured();
+    const state = await signOAuthState(userId, "facebook", { metaPhase: "page" });
+    authorizeUrl = buildMetaPageAuthorizeUrl(state);
+  } else {
+    assertMetaLoginConfigured();
+    const state = await signOAuthState(userId, "facebook", { metaPhase: "login" });
+    authorizeUrl = buildMetaLoginAuthorizeUrl(state);
+  }
+
   if (req.headers.accept?.includes("application/json")) {
     sendSuccess(res, { authorizeUrl });
     return;
@@ -220,7 +234,10 @@ export async function getMetaOAuthCallback(req: Request, res: Response): Promise
     });
 
     if (isMetaDualAppEnabled()) {
-      res.redirect(302, getMetaPageOAuthStartUrl());
+      res.redirect(
+        302,
+        creatorPlatformOAuthRedirectUrl({ outcome: "pending_page", platform: "facebook" }),
+      );
       return;
     }
 

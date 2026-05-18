@@ -368,6 +368,7 @@ export async function fetchInstagramMediaStats(
 const FACEBOOK_REEL_VIEW_METRICS = [
   "fb_reels_total_plays",
   "blue_reels_play_count",
+  "post_impressions_unique",
   "total_video_impressions",
   "total_video_views",
 ] as const;
@@ -380,15 +381,83 @@ type FbEngagement = {
 
 type FbReelMeta = { id?: string; from?: { id?: string } } & FbEngagement;
 
-async function listFacebookPages(
-  userAccessToken: string,
-): Promise<Array<{ id?: string; access_token?: string }>> {
+type FbManagedPage = { id: string; name?: string; access_token: string };
+
+async function listManagedFacebookPages(accessToken: string): Promise<FbManagedPage[]> {
   const json = (await graphGet("/me/accounts", {
     fields: "id,name,access_token",
-    access_token: userAccessToken,
+    access_token: accessToken,
     limit: "50",
-  })) as { data?: Array<{ id?: string; access_token?: string }> };
-  return json.data ?? [];
+  })) as { data?: Array<{ id?: string; name?: string; access_token?: string }> };
+  const rows: FbManagedPage[] = [];
+  for (const p of json.data ?? []) {
+    if (p.id && p.access_token) {
+      rows.push({ id: p.id, name: p.name, access_token: p.access_token });
+    }
+  }
+  return rows;
+}
+
+async function listAllManagedFacebookPages(
+  pageAppUserToken: string | null,
+  loginUserToken: string,
+): Promise<FbManagedPage[]> {
+  const byId = new Map<string, FbManagedPage>();
+  for (const token of [pageAppUserToken, loginUserToken].filter((t): t is string => Boolean(t))) {
+    try {
+      for (const p of await listManagedFacebookPages(token)) {
+        if (!byId.has(p.id)) byId.set(p.id, p);
+      }
+    } catch {
+      /* try next token */
+    }
+  }
+  return [...byId.values()];
+}
+
+async function managedPageListsReelId(
+  pageId: string,
+  reelId: string,
+  pageAccessToken: string,
+): Promise<boolean> {
+  let url: string | null =
+    `${graphHost()}/${pageId}/video_reels?fields=id&limit=50&access_token=${encodeURIComponent(pageAccessToken)}`;
+  let pages = 0;
+  while (url && pages < 25) {
+    const r = await fetch(url);
+    const json = (await r.json()) as GraphErr & {
+      data?: Array<{ id?: string }>;
+      paging?: { next?: string };
+    };
+    if (!r.ok || json.error) return false;
+    if ((json.data ?? []).some((row) => row.id === reelId)) return true;
+    url = json.paging?.next ?? null;
+    pages += 1;
+  }
+  return false;
+}
+
+function formatFacebookPageDisplayHandle(pages: FbManagedPage[]): string {
+  if (pages.length === 0) return "Facebook Page";
+  const first = pages[0].name?.trim() || pages[0].id;
+  if (pages.length === 1) return first;
+  return `${first} +${pages.length - 1} more`;
+}
+
+async function updateFacebookDisplayHandleFromPages(
+  userId: string,
+  pageAppUserToken: string,
+): Promise<void> {
+  let pages: FbManagedPage[] = [];
+  try {
+    pages = await listManagedFacebookPages(pageAppUserToken);
+  } catch {
+    pages = [];
+  }
+  await prisma.creatorPlatformAccount.updateMany({
+    where: { userId, platform: "facebook" },
+    data: { displayHandle: formatFacebookPageDisplayHandle(pages) },
+  });
 }
 
 async function fetchFacebookVideoInsightPlays(
@@ -452,73 +521,79 @@ async function loadFacebookReelMeta(reelId: string, accessToken: string): Promis
   }
 }
 
-function isFacebookReelOwnedByCreator(
-  meta: FbReelMeta,
-  creatorUserId: string,
-  managedPageIds: string[],
-): boolean {
+function isFacebookPageReel(meta: FbReelMeta, creatorUserId: string, pageIds: string[]): boolean {
   const fromId = meta.from?.id;
   if (!fromId) return true;
-  if (fromId === creatorUserId) return true;
-  return managedPageIds.includes(fromId);
+  if (fromId === creatorUserId) return false;
+  return pageIds.includes(fromId);
 }
 
-/** Login token + optional Page-app token + Page access tokens. */
+/** Facebook campaign submissions: Page Reels only (Meta video_insights). */
+export async function assertFacebookReadyForSubmission(creatorUserId: string): Promise<void> {
+  const row = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId: creatorUserId, platform: "facebook" } },
+  });
+  if (!row) throw new AppError("creator_platform_not_connected", 403);
+  if (row.linkStatus === "reconnect") throw new AppError("platform_reconnect_required", 401);
+  if (isMetaDualAppEnabled()) {
+    if (row.linkStatus === "pending_page" || !row.pageAccessTokenEncrypted) {
+      throw new AppError("meta_page_connect_required", 403);
+    }
+  } else if (row.linkStatus !== "connected") {
+    throw new AppError("creator_platform_not_connected", 403);
+  }
+}
+
 export async function fetchFacebookObjectStats(
   objectId: string,
   creatorUserId: string,
 ): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
+  await assertFacebookReadyForSubmission(creatorUserId);
+
   const loginToken = await getValidMetaLoginAccessToken(creatorUserId);
   const pageAppToken = await getValidMetaPageAccessTokenOptional(creatorUserId);
-  const me = await fetchMetaMeUserId(loginToken);
-
-  let pages: Array<{ id?: string; access_token?: string }> = [];
-  const accountsToken = pageAppToken ?? loginToken;
-  try {
-    pages = await listFacebookPages(accountsToken);
-  } catch {
-    /* token may lack pages_show_list */
+  if (isMetaDualAppEnabled() && !pageAppToken) {
+    throw new AppError("meta_page_connect_required", 403);
   }
 
-  const pageIds = pages.map((p) => p.id).filter((id): id is string => Boolean(id));
-  const tokens = [
-    loginToken,
-    ...(pageAppToken ? [pageAppToken] : []),
-    ...pages.map((p) => p.access_token).filter((t): t is string => Boolean(t)),
-  ];
+  const me = await fetchMetaMeUserId(loginToken);
+  const pages = await listAllManagedFacebookPages(pageAppToken, loginToken);
+  if (pages.length === 0) {
+    throw new AppError("facebook_no_pages_linked", 403);
+  }
 
-  let confirmedOwned = false;
-  let sawForeignOwner = false;
+  const pageIds = pages.map((p) => p.id);
+  let sawPersonalReel = false;
 
-  for (const token of tokens) {
-    let meta: FbReelMeta;
+  for (const page of pages) {
+    let meta: FbReelMeta | null = null;
     try {
-      meta = await loadFacebookReelMeta(objectId, token);
+      meta = await loadFacebookReelMeta(objectId, page.access_token);
     } catch (e) {
       if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
+      const listed = await managedPageListsReelId(page.id, objectId, page.access_token);
+      if (listed) {
+        meta = { id: objectId, from: { id: page.id } };
+      }
+    }
+
+    if (!meta?.id) continue;
+
+    if (!isFacebookPageReel(meta, me.id, pageIds)) {
+      if (meta.from?.id === me.id) sawPersonalReel = true;
       continue;
     }
 
-    if (!isFacebookReelOwnedByCreator(meta, me.id, pageIds)) {
-      sawForeignOwner = true;
-      continue;
-    }
-
-    confirmedOwned = true;
     try {
-      const views = await fetchFacebookVideoInsightPlays(objectId, token);
+      const views = await fetchFacebookVideoInsightPlays(objectId, page.access_token);
       return { views, ...engagementFromMeta(meta) };
     } catch (e) {
       if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
-      /* try next token for insights */
     }
   }
 
-  if (confirmedOwned) {
-    throw new AppError("facebook_video_insights_unavailable", 403);
-  }
-  if (sawForeignOwner) {
-    throw new AppError("facebook_reel_not_owned", 403);
+  if (sawPersonalReel) {
+    throw new AppError("facebook_page_reel_required", 403);
   }
   throw new AppError("facebook_reel_not_owned", 403);
 }
@@ -530,8 +605,10 @@ export async function upsertMetaLoginToken(params: {
 }): Promise<void> {
   const me = await fetchMetaMeUserId(params.accessToken);
   const providerUserId = me.id;
-  const displayHandle = me.name ?? me.id;
   const exp = new Date(Date.now() + Math.max(300, params.expiresIn) * 1000);
+  const dual = isMetaDualAppEnabled();
+  const linkStatus = dual ? "pending_page" : "connected";
+  const displayHandle = dual ? "Finish Page setup" : (me.name ?? me.id);
 
   await prisma.creatorPlatformAccount.upsert({
     where: { userId_platform: { userId: params.userId, platform: "facebook" } },
@@ -543,7 +620,7 @@ export async function upsertMetaLoginToken(params: {
       refreshTokenEncrypted: encryptSecret(params.accessToken),
       tokenExpiresAt: exp,
       displayHandle,
-      linkStatus: "connected",
+      linkStatus,
       lastRefreshError: null,
       lastRefreshedAt: new Date(),
       connectedAt: new Date(),
@@ -553,8 +630,8 @@ export async function upsertMetaLoginToken(params: {
       accessTokenEncrypted: encryptSecret(params.accessToken),
       refreshTokenEncrypted: encryptSecret(params.accessToken),
       tokenExpiresAt: exp,
-      displayHandle,
-      linkStatus: "connected",
+      displayHandle: dual ? "Finish Page setup" : (me.name ?? me.id),
+      linkStatus: dual ? "pending_page" : "connected",
       lastRefreshError: null,
       lastRefreshedAt: new Date(),
     },
@@ -583,6 +660,7 @@ export async function upsertMetaPageToken(params: {
       lastRefreshedAt: new Date(),
     },
   });
+  await updateFacebookDisplayHandleFromPages(params.userId, params.accessToken);
 }
 
 /** @deprecated Use {@link upsertMetaLoginToken}. */
@@ -627,7 +705,7 @@ async function refreshMetaLoginTokenRow(
         accessTokenEncrypted: encryptSecret(next.accessToken),
         refreshTokenEncrypted: encryptSecret(next.accessToken),
         tokenExpiresAt: exp,
-        linkStatus: "connected",
+        linkStatus: row.linkStatus === "pending_page" ? "pending_page" : "connected",
         lastRefreshError: null,
         lastRefreshedAt: new Date(),
       },
@@ -689,6 +767,31 @@ export async function getValidMetaLoginAccessToken(userId: string): Promise<stri
 }
 
 /** Page-app token when dual Meta apps are configured; null if single-app mode. */
+export function metaFacebookOAuthNeedsPageStep(row: {
+  accessTokenEncrypted: string;
+  pageAccessTokenEncrypted: string | null;
+} | null): boolean {
+  return Boolean(
+    row?.accessTokenEncrypted && isMetaDualAppEnabled() && !row.pageAccessTokenEncrypted,
+  );
+}
+
+export function effectiveFacebookLinkStatus(row: {
+  platform: string;
+  linkStatus: string;
+  pageAccessTokenEncrypted: string | null;
+}): string {
+  if (
+    row.platform === "facebook" &&
+    isMetaDualAppEnabled() &&
+    !row.pageAccessTokenEncrypted &&
+    row.linkStatus !== "reconnect"
+  ) {
+    return "pending_page";
+  }
+  return row.linkStatus;
+}
+
 export async function getValidMetaPageAccessTokenOptional(
   userId: string,
 ): Promise<string | null> {

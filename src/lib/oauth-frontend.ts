@@ -10,7 +10,7 @@ export type CreatorPlatformOAuthPlatform = "tiktok" | "facebook";
 
 /** Post-connect redirect for creator TikTok / Meta OAuth (`/account` + oauth query params). */
 export function creatorPlatformOAuthRedirectUrl(params: {
-  outcome: "success" | "error";
+  outcome: "success" | "error" | "pending_page";
   platform: CreatorPlatformOAuthPlatform;
   reason?: string;
 }): string {

@@ -39,6 +39,7 @@ enum Platform {
 enum LinkStatus {
   connected
   reconnect
+  pending_page
 
   @@map("link_status_enum")
 }

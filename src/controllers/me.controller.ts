@@ -4,6 +4,7 @@ import { sendSuccess } from "../utils/api-response.js";
 import { paramString } from "../lib/params.js";
 import type { Platform } from "../generated/prisma/enums.js";
 import type { PatchMeBodyDto, PutMeRoleBodyDto } from "../validation/me.schema.js";
+import { effectiveFacebookLinkStatus } from "../services/meta-platform.service.js";
 import {
   buildMeResponseData,
   completeMeOnboarding,
@@ -44,7 +45,7 @@ export async function getMePlatforms(req: Request, res: Response): Promise<void>
     platformLinks: rows.map((r) => ({
       platform: r.platform,
       displayHandle: r.displayHandle,
-      linkStatus: r.linkStatus,
+      linkStatus: effectiveFacebookLinkStatus(r),
       connectedAt: r.connectedAt?.toISOString() ?? null,
     })),
   });

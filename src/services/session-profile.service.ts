@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { publicUrlFromObjectKey } from "../lib/publicObjectUrl.js";
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import type { PutMeBrandProfileBodyDto } from "../validation/me-profile.schema.js";
+import { effectiveFacebookLinkStatus } from "./meta-platform.service.js";
 import { syncBrandXenditSubAccountProfile } from "./xendit-platform.service.js";
 
 export function primaryRoleFromProfiles(
@@ -21,7 +22,7 @@ function mapPlatformLinks(
   return rows.map((r) => ({
     platform: r.platform,
     displayHandle: r.displayHandle,
-    linkStatus: r.linkStatus,
+    linkStatus: effectiveFacebookLinkStatus(r),
     connectedAt: r.connectedAt?.toISOString() ?? null,
   }));
 }
