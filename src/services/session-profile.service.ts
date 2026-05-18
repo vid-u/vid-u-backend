@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { publicUrlFromObjectKey } from "../lib/publicObjectUrl.js";
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import type { PutMeBrandProfileBodyDto } from "../validation/me-profile.schema.js";
-import { effectiveFacebookLinkStatus } from "./meta-platform.service.js";
+import { effectiveFacebookLinkStatus, syncFacebookPageLinkage } from "./meta-platform.service.js";
 import { syncBrandXenditSubAccountProfile } from "./xendit-platform.service.js";
 
 export function primaryRoleFromProfiles(
@@ -29,6 +29,11 @@ function mapPlatformLinks(
 
 export async function getMeProfilePayload(userId: string, role: UserRole) {
   if (role === "creator") {
+    try {
+      await syncFacebookPageLinkage(userId);
+    } catch {
+      /* keep last known linkage if Meta is temporarily unavailable */
+    }
     const rows = await prisma.creatorPlatformAccount.findMany({
       where: { userId },
       orderBy: { platform: "asc" },

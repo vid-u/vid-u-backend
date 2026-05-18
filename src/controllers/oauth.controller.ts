@@ -161,7 +161,7 @@ export async function getMetaOAuthStart(req: Request, res: Response): Promise<vo
   if (metaFacebookOAuthNeedsPageStep(row)) {
     assertMetaPageConfigured();
     const state = await signOAuthState(userId, "facebook", { metaPhase: "page" });
-    authorizeUrl = buildMetaPageAuthorizeUrl(state);
+    authorizeUrl = buildMetaPageAuthorizeUrl(state, true);
   } else {
     assertMetaLoginConfigured();
     const state = await signOAuthState(userId, "facebook", { metaPhase: "login" });
@@ -179,7 +179,7 @@ export async function getMetaOAuthStart(req: Request, res: Response): Promise<vo
 export async function getMetaOAuthPageStart(req: Request, res: Response): Promise<void> {
   assertMetaPageConfigured();
   const state = await signOAuthState(req.dbUser!.id, "facebook", { metaPhase: "page" });
-  const authorizeUrl = buildMetaPageAuthorizeUrl(state);
+  const authorizeUrl = buildMetaPageAuthorizeUrl(state, true);
   if (req.headers.accept?.includes("application/json")) {
     sendSuccess(res, { authorizeUrl });
     return;

@@ -101,7 +101,11 @@ function metaAppCredentials(kind: MetaAppKind): { appId: string; appSecret: stri
   return { appId: getMetaLoginAppId(), appSecret: getMetaLoginAppSecret() };
 }
 
-export function buildMetaAuthorizeUrl(state: string, kind: MetaAppKind = "login"): string {
+export function buildMetaAuthorizeUrl(
+  state: string,
+  kind: MetaAppKind = "login",
+  options?: { rerequest?: boolean },
+): string {
   if (kind === "page") assertMetaPageConfigured();
   else assertMetaLoginConfigured();
 
@@ -118,6 +122,9 @@ export function buildMetaAuthorizeUrl(state: string, kind: MetaAppKind = "login"
   authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("state", state);
+  if (options?.rerequest) {
+    authUrl.searchParams.set("auth_type", "rerequest");
+  }
   return authUrl.href;
 }
 
@@ -127,8 +134,8 @@ export function buildMetaLoginAuthorizeUrl(state: string): string {
 }
 
 /** Second step when META_PAGE_APP_* is set. */
-export function buildMetaPageAuthorizeUrl(state: string): string {
-  return buildMetaAuthorizeUrl(state, "page");
+export function buildMetaPageAuthorizeUrl(state: string, rerequest = false): string {
+  return buildMetaAuthorizeUrl(state, "page", { rerequest });
 }
 
 type GraphErr = { error?: { message?: string; type?: string } };
@@ -437,26 +444,80 @@ async function managedPageListsReelId(
   return false;
 }
 
+/** Shown in Account UI when Meta returned no Pages for this token. */
+export const FACEBOOK_SELECT_PAGE_HANDLE = "Select your Facebook Page";
+
+const FACEBOOK_NO_PAGES_REFRESH_ERROR =
+  "No Facebook Page granted. Disconnect, connect again, and select the Page where you publish Reels.";
+
 function formatFacebookPageDisplayHandle(pages: FbManagedPage[]): string {
-  if (pages.length === 0) return "Facebook Page";
+  if (pages.length === 0) return FACEBOOK_SELECT_PAGE_HANDLE;
   const first = pages[0].name?.trim() || pages[0].id;
   if (pages.length === 1) return first;
   return `${first} +${pages.length - 1} more`;
 }
 
-async function updateFacebookDisplayHandleFromPages(
-  userId: string,
-  pageAppUserToken: string,
-): Promise<void> {
-  let pages: FbManagedPage[] = [];
-  try {
-    pages = await listManagedFacebookPages(pageAppUserToken);
-  } catch {
-    pages = [];
+function facebookLinkageLooksIncomplete(row: {
+  linkStatus: string;
+  displayHandle: string;
+}): boolean {
+  if (row.linkStatus === "pending_page") return true;
+  if (row.linkStatus !== "connected") return false;
+  return (
+    row.displayHandle === FACEBOOK_SELECT_PAGE_HANDLE ||
+    row.displayHandle === "Facebook Page" ||
+    row.displayHandle === "Finish Page setup"
+  );
+}
+
+/** Reconcile DB link status with Meta `/me/accounts` (Page tokens + names). */
+export async function syncFacebookPageLinkage(userId: string): Promise<void> {
+  const row = await prisma.creatorPlatformAccount.findUnique({
+    where: { userId_platform: { userId, platform: "facebook" } },
+  });
+  if (!row || row.linkStatus === "reconnect") return;
+
+  if (isMetaDualAppEnabled() && !row.pageAccessTokenEncrypted) {
+    await prisma.creatorPlatformAccount.update({
+      where: { id: row.id },
+      data: {
+        linkStatus: "pending_page",
+        displayHandle: "Finish Page setup",
+        lastRefreshError: FACEBOOK_NO_PAGES_REFRESH_ERROR,
+      },
+    });
+    return;
   }
-  await prisma.creatorPlatformAccount.updateMany({
-    where: { userId, platform: "facebook" },
-    data: { displayHandle: formatFacebookPageDisplayHandle(pages) },
+
+  let loginToken: string;
+  let pageToken: string | null = null;
+  try {
+    loginToken = await getValidMetaLoginAccessToken(userId);
+    pageToken = await getValidMetaPageAccessTokenOptional(userId);
+  } catch {
+    return;
+  }
+
+  const pages = await listAllManagedFacebookPages(pageToken, loginToken);
+  if (pages.length === 0) {
+    await prisma.creatorPlatformAccount.update({
+      where: { id: row.id },
+      data: {
+        linkStatus: "pending_page",
+        displayHandle: FACEBOOK_SELECT_PAGE_HANDLE,
+        lastRefreshError: FACEBOOK_NO_PAGES_REFRESH_ERROR,
+      },
+    });
+    return;
+  }
+
+  await prisma.creatorPlatformAccount.update({
+    where: { id: row.id },
+    data: {
+      linkStatus: "connected",
+      displayHandle: formatFacebookPageDisplayHandle(pages),
+      lastRefreshError: null,
+    },
   });
 }
 
@@ -557,8 +618,15 @@ export async function fetchFacebookObjectStats(
   }
 
   const me = await fetchMetaMeUserId(loginToken);
-  const pages = await listAllManagedFacebookPages(pageAppToken, loginToken);
+  let pages = await listAllManagedFacebookPages(pageAppToken, loginToken);
   if (pages.length === 0) {
+    await syncFacebookPageLinkage(creatorUserId);
+    pages = await listAllManagedFacebookPages(pageAppToken, loginToken);
+  }
+  if (pages.length === 0) {
+    if (!isMetaDualAppEnabled()) {
+      throw new AppError("facebook_page_app_required", 403);
+    }
     throw new AppError("facebook_no_pages_linked", 403);
   }
 
@@ -636,6 +704,10 @@ export async function upsertMetaLoginToken(params: {
       lastRefreshedAt: new Date(),
     },
   });
+
+  if (!dual) {
+    await syncFacebookPageLinkage(params.userId);
+  }
 }
 
 export async function upsertMetaPageToken(params: {
@@ -655,12 +727,10 @@ export async function upsertMetaPageToken(params: {
     data: {
       pageAccessTokenEncrypted: encryptSecret(params.accessToken),
       pageTokenExpiresAt: exp,
-      linkStatus: "connected",
-      lastRefreshError: null,
       lastRefreshedAt: new Date(),
     },
   });
-  await updateFacebookDisplayHandleFromPages(params.userId, params.accessToken);
+  await syncFacebookPageLinkage(params.userId);
 }
 
 /** @deprecated Use {@link upsertMetaLoginToken}. */
@@ -780,13 +850,15 @@ export function effectiveFacebookLinkStatus(row: {
   platform: string;
   linkStatus: string;
   pageAccessTokenEncrypted: string | null;
+  displayHandle: string;
 }): string {
-  if (
-    row.platform === "facebook" &&
-    isMetaDualAppEnabled() &&
-    !row.pageAccessTokenEncrypted &&
-    row.linkStatus !== "reconnect"
-  ) {
+  if (row.platform !== "facebook" || row.linkStatus === "reconnect") {
+    return row.linkStatus;
+  }
+  if (isMetaDualAppEnabled() && !row.pageAccessTokenEncrypted) {
+    return "pending_page";
+  }
+  if (facebookLinkageLooksIncomplete(row)) {
     return "pending_page";
   }
   return row.linkStatus;
