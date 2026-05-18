@@ -119,9 +119,6 @@ export function validatePayoutAmount(channelCode: string, amountPhp: number): vo
   if (!limits) {
     throw new ValidationError("Unsupported payout channel");
   }
-  if (amountPhp < limits.min) {
-    throw new ValidationError("below_minimum_payout");
-  }
   if (amountPhp > limits.max) {
     throw new ValidationError("above_maximum_payout");
   }

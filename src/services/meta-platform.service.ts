@@ -664,18 +664,82 @@ type FbVideoInsightRow = {
   values?: Array<{ value?: number | Record<string, number> }>;
 };
 
+function sumInsightValue(raw: number | Record<string, number> | undefined): bigint | null {
+  if (typeof raw === "number" && raw >= 0) {
+    return BigInt(Math.floor(raw));
+  }
+  if (raw && typeof raw === "object") {
+    let sum = 0;
+    for (const v of Object.values(raw)) {
+      if (typeof v === "number" && v >= 0) sum += v;
+    }
+    return BigInt(sum);
+  }
+  return null;
+}
+
 function extractReelPlaysFromInsightsPayload(
   json: { data?: FbVideoInsightRow[] },
 ): bigint | null {
   const rows = json.data ?? [];
   for (const metric of FACEBOOK_REEL_VIEW_METRICS) {
     const row = rows.find((r) => r.name === metric) ?? (rows.length === 1 ? rows[0] : undefined);
-    const raw = row?.values?.[0]?.value;
-    if (typeof raw === "number" && raw >= 0) {
-      return BigInt(Math.floor(raw));
-    }
+    const plays = sumInsightValue(row?.values?.[0]?.value);
+    if (plays != null) return plays;
   }
   return null;
+}
+
+function extractReelReactionsFromInsightsRows(rows: FbVideoInsightRow[]): bigint | undefined {
+  const row = rows.find((r) => r.name === "post_video_likes_by_reaction_type");
+  const total = sumInsightValue(row?.values?.[0]?.value);
+  return total ?? undefined;
+}
+
+function extractReelEngagementsFromInsightsRows(rows: FbVideoInsightRow[]): bigint | undefined {
+  const row = rows.find((r) => r.name === "post_video_social_actions");
+  const total = sumInsightValue(row?.values?.[0]?.value);
+  return total ?? undefined;
+}
+
+async function fetchFacebookVideoInsightsRows(
+  videoId: string,
+  accessToken: string,
+): Promise<FbVideoInsightRow[]> {
+  const json = (await graphGet(`/${videoId}/video_insights`, {
+    period: "lifetime",
+    access_token: accessToken,
+  })) as { data?: FbVideoInsightRow[] };
+  return json.data ?? [];
+}
+
+export type FacebookReelStats = {
+  views: bigint;
+  reactions?: bigint;
+  engagements?: bigint;
+};
+
+/** Views + Reels reactions/engagements from one video_insights call. */
+async function fetchFacebookReelStatsFromInsights(
+  videoId: string,
+  accessToken: string,
+): Promise<FacebookReelStats> {
+  try {
+    const rows = await fetchFacebookVideoInsightsRows(videoId, accessToken);
+    const views = extractReelPlaysFromInsightsPayload({ data: rows });
+    if (views == null) {
+      throw new AppError("facebook_video_insights_unavailable", 403);
+    }
+    return {
+      views,
+      reactions: extractReelReactionsFromInsightsRows(rows),
+      engagements: extractReelEngagementsFromInsightsRows(rows),
+    };
+  } catch (e) {
+    if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
+    const views = await fetchFacebookVideoInsightPlays(videoId, accessToken);
+    return { views };
+  }
 }
 
 async function fetchFacebookVideoInsightPlays(
@@ -775,7 +839,7 @@ export async function assertFacebookReadyForSubmission(creatorUserId: string): P
 export async function fetchFacebookObjectStats(
   objectId: string,
   creatorUserId: string,
-): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
+): Promise<FacebookReelStats> {
   await assertFacebookReadyForSubmission(creatorUserId);
 
   const loginToken = await getValidMetaLoginAccessToken(creatorUserId);
@@ -803,19 +867,17 @@ export async function fetchFacebookObjectStats(
   /** If video_insights works with a Page token, that Page can access the Reel (same as Graph Explorer). */
   for (const page of pages) {
     try {
-      const views = await fetchFacebookVideoInsightPlays(objectId, page.access_token);
-      let engagement: { likes?: bigint; comments?: bigint } = {};
+      const stats = await fetchFacebookReelStatsFromInsights(objectId, page.access_token);
       try {
         const meta = await loadFacebookReelMeta(objectId, page.access_token);
         if (meta.from?.id === me.id) {
           sawPersonalReel = true;
           continue;
         }
-        engagement = engagementFromMeta(meta);
       } catch {
-        /* plays count is enough; engagement is optional */
+        /* video_insights is authoritative for Page Reels */
       }
-      return { views, ...engagement };
+      return stats;
     } catch (e) {
       if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
     }
@@ -841,8 +903,13 @@ export async function fetchFacebookObjectStats(
     }
 
     try {
-      const views = await fetchFacebookVideoInsightPlays(objectId, page.access_token);
-      return { views, ...engagementFromMeta(meta) };
+      const stats = await fetchFacebookReelStatsFromInsights(objectId, page.access_token);
+      const fallback = engagementFromMeta(meta);
+      return {
+        views: stats.views,
+        reactions: stats.reactions ?? fallback.likes,
+        engagements: stats.engagements ?? fallback.comments,
+      };
     } catch (e) {
       if (e instanceof AppError && e.message === "meta_read_insights_required") throw e;
     }

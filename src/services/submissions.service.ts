@@ -17,6 +17,7 @@ import { BRAND_REFUND_LEDGER_NOTE } from "./xendit-payout.service.js";
 import {
   fetchCreatorContentStats,
   normalizeContentUrl,
+  type CreatorContentStats,
 } from "./platform-content.service.js";
 import {
   getCachedSubmissionPreview,
@@ -52,9 +53,48 @@ export type SubmissionPreviewCachedPayload = {
   views: string;
   likes?: string;
   comments?: string;
+  reactions?: string;
+  engagements?: string;
   issues: string[];
   cached: boolean;
 };
+
+function previewStatsPayloadFromContentStats(stats: CreatorContentStats): {
+  views: string;
+  likes?: string;
+  comments?: string;
+  reactions?: string;
+  engagements?: string;
+} {
+  if (stats.platform === "facebook") {
+    return {
+      views: stats.views.toString(),
+      reactions: stats.reactions?.toString(),
+      engagements: stats.engagements?.toString(),
+    };
+  }
+  return {
+    views: stats.views.toString(),
+    likes: stats.likes?.toString(),
+    comments: stats.comments?.toString(),
+  };
+}
+
+function engagementLockedFromContentStats(stats: CreatorContentStats): {
+  likesLocked: bigint | null;
+  commentsLocked: bigint | null;
+} {
+  if (stats.platform === "facebook") {
+    return {
+      likesLocked: stats.reactions ?? null,
+      commentsLocked: stats.engagements ?? null,
+    };
+  }
+  return {
+    likesLocked: stats.likes ?? null,
+    commentsLocked: stats.comments ?? null,
+  };
+}
 
 const SUBMISSION_PREVIEW_MIN_VIEWS = 1000n;
 
@@ -75,6 +115,8 @@ export async function runSubmissionPreview(
       views: cached.views,
       likes: cached.likes,
       comments: cached.comments,
+      reactions: cached.reactions,
+      engagements: cached.engagements,
       issues: eligible ? [] : ["below_minimum_views"],
       cached: true,
     };
@@ -86,11 +128,7 @@ export async function runSubmissionPreview(
     creatorUserId,
   );
 
-  const payload = {
-    views: stats.views.toString(),
-    likes: stats.likes?.toString(),
-    comments: stats.comments?.toString(),
-  };
+  const payload = previewStatsPayloadFromContentStats(stats);
   setCachedSubmissionPreview(creatorUserId, body.url, body.platform as Platform, payload);
 
   const eligible = stats.views >= SUBMISSION_PREVIEW_MIN_VIEWS;
@@ -195,11 +233,6 @@ export async function confirmSubmission(
       partialReason = "channel_max";
     }
 
-    const minNet = toDecimal(limits.min);
-    if (creatorNet.lt(minNet)) {
-      throw new ConflictError("below_minimum_payout");
-    }
-
     return tx.submission.create({
       data: {
         campaignId,
@@ -208,8 +241,7 @@ export async function confirmSubmission(
         platform,
         viewsLocked,
         fundedViews,
-        likesLocked: stats.likes ?? null,
-        commentsLocked: stats.comments ?? null,
+        ...engagementLockedFromContentStats(stats),
         grossAmount: gross,
         creatorNet,
         partialReason,

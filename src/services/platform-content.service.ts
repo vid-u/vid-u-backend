@@ -28,11 +28,27 @@ export function contentUrlFromNormalized(normalizedUrl: string, platform: Platfo
   return normalizedUrl;
 }
 
+export type TikTokContentStats = {
+  platform: "tiktok";
+  views: bigint;
+  likes?: bigint;
+  comments?: bigint;
+};
+
+export type FacebookContentStats = {
+  platform: "facebook";
+  views: bigint;
+  reactions?: bigint;
+  engagements?: bigint;
+};
+
+export type CreatorContentStats = TikTokContentStats | FacebookContentStats;
+
 export async function fetchCreatorContentStats(
   url: string,
   platform: Platform,
   creatorUserId: string,
-): Promise<{ views: bigint; likes?: bigint; comments?: bigint }> {
+): Promise<CreatorContentStats> {
   if (platform === "tiktok") {
     const access = await getValidTikTokAccessToken(creatorUserId);
     const resolved = await resolveTikTokUrl(url);
@@ -46,6 +62,7 @@ export async function fetchCreatorContentStats(
       throw new ForbiddenError("tiktok_video_not_owned_or_missing");
     }
     return {
+      platform: "tiktok",
       views: BigInt(v.view_count ?? 0),
       likes: v.like_count != null ? BigInt(v.like_count) : undefined,
       comments: v.comment_count != null ? BigInt(v.comment_count) : undefined,
@@ -61,7 +78,8 @@ export async function fetchCreatorContentStats(
 
     const fbNumeric = extractFacebookReelNumericId(url);
     if (fbNumeric) {
-      return fetchFacebookObjectStats(fbNumeric, creatorUserId);
+      const stats = await fetchFacebookObjectStats(fbNumeric, creatorUserId);
+      return { platform: "facebook", ...stats };
     }
 
     throw new ValidationError("unsupported_facebook_content_url");

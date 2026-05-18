@@ -3,8 +3,12 @@ import { normalizeContentUrl } from "./platform-content.service.js";
 
 export type PreviewStatsPayload = {
   views: string;
+  /** TikTok */
   likes?: string;
   comments?: string;
+  /** Facebook Reels */
+  reactions?: string;
+  engagements?: string;
 };
 
 type CacheEntry = { payload: PreviewStatsPayload; expiresAt: number };
